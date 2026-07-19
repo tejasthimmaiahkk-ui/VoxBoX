@@ -1,0 +1,29 @@
+# Android / Gradle outputs
+.gradle/
+.kotlin/
+**/build/
+*.apk
+*.aab
+
+# Local Android Studio configuration
+.idea/
+*.iml
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Credentials and local service configuration
+.env
+.env.*
+secrets.properties
+*.jks
+*.keystore
+
+# Operating system files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local artifact inspection output (final PPTX remains tracked)
+outputs/*.inspect.ndjson
