@@ -67,7 +67,15 @@ Microphone use is visible and limited to an active user session. Notes remain lo
 
 ## 9. Results
 
-Pending implementation and evaluation. Do not insert estimated metrics here.
+### 9.1 Initial native-speech milestone
+
+The first implementation milestone compiled and passed the debug unit-test and APK-assembly tasks. Six targeted VoxScript tests passed for plain dictation, heading, bullet point, a valid pie-chart command, out-of-range percentage and a missing label; the generated starter test also remained passing.
+
+The exact APK was installed on a `2411DRN47I` running Android 16 / API 36. Permission-denied and granted states rendered correctly. Android reported an on-device recognizer, but its current language was unavailable. This revealed an implementation assumption during physical testing. The controller was corrected to switch to the Android system recognizer and to avoid forcing the offline preference on that fallback. A subsequent device run reached the active `Listening…` state with stop and cancel controls, and the system-service/network possibility was disclosed in the UI.
+
+The deterministic sample `Tejas pie chart 25 percent yellow label wheat` produced a yellow 25% wheat sector and white remainder on the physical device. Human-spoken transcription was not measured during automated ADB operation; therefore no word error rate or spoken-command accuracy is claimed yet.
+
+Screenshots and UI hierarchies are stored under `evidence/speech-milestone/`.
 
 ## 10. Conclusion
 
@@ -90,4 +98,3 @@ Pending final evaluation.
 - Device model/Android version and speech-service configuration.
 - Error analysis and limitations.
 - AI comparison protocol and results after provider integration.
-

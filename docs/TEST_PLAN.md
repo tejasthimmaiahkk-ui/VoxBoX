@@ -94,4 +94,11 @@ Each runnable milestone uses two relevant forms of evidence: an automated check 
 - Android starter build and unit test: passed after pinning SDK-compatible AndroidX versions.
 - Physical-device baseline: passed on `2411DRN47I`, Android 16 / API 36.
 - Baseline install/launch and `Hello Android!` UI hierarchy: passed; evidence is in `evidence/baseline/`.
-- Feature tests: pending because feature implementation has not started.
+- Native speech/VoxScript build: passed.
+- Parser unit tests: seven total tests passed in the milestone test task, including six VoxScript cases.
+- Permission denied/granted UI: passed on the physical device.
+- On-device-language failure to system-recognizer fallback: passed on the physical device.
+- Active system-recognizer `Listening…`, stop and cancel UI: passed on the physical device.
+- Requested 25% yellow wheat chart preview: passed visually and through UI hierarchy.
+- Human-spoken phrase transcription and word error rate: pending; automated ADB control did not supply microphone speech.
+- Room persistence, full editor, organization and remaining command tests: pending.

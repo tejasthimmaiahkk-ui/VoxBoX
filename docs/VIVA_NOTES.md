@@ -51,7 +51,10 @@ The demonstration does not depend on AI. The scope is bounded to a single-user l
 ## Current honest status
 
 - Concept, scope, architecture, grammar draft, evaluation plan and Review-1 PPT are complete.
-- Android application feature/UI source remains the generated starter; only incompatible dependency versions were corrected.
-- The corrected starter builds successfully and has been installed/launched on `2411DRN47I`, Android 16 / API 36.
-- The only source-visible UI is still the starter `Hello Android!`; feature implementation has not begun.
+- Native permission handling, bounded speech capture, partial/final callback state and recognizer cleanup are implemented.
+- Android initially reports an on-device recognizer on `2411DRN47I`, but the selected language is unavailable; VoxBox now falls back to the system recognizer and discloses possible network use.
+- Plain dictation, heading, bullet and pie-chart parsing are implemented and unit-tested.
+- The 25% yellow wheat chart preview is verified on the physical device.
+- Room persistence, the full editor/organization layer, remaining commands and AI are not implemented.
+- Human-spoken transcription metrics are not available yet; the device pass verified activation/state handling, not word error rate.
 - No accuracy result is available yet.

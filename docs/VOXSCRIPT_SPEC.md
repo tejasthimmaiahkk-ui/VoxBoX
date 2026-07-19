@@ -1,6 +1,6 @@
 # VoxScript Specification
 
-Status: Draft 0.1  
+Status: Draft 0.2
 Date: 2026-07-19
 
 ## Purpose
@@ -61,6 +61,18 @@ ParseResult
 | Control | `NEW_SECTION` | “Vox new section Results” |
 | Control | `SAVE_NOTE` | “Vox save note” |
 
+## Implemented subset in Draft 0.2
+
+- Wake words: `Vox`, `Tejas`, `Note`.
+- Plain speech without a wake word returns `PlainDictation`.
+- `heading` / `title` returns `Heading`.
+- `bullet point` / `bullet` returns `BulletPoint`; the longest alias is matched first.
+- `pie chart` extracts integer percentage, supported named color and text after `label` or `tag`.
+- Pie values outside 0–100 and missing color/label return `InvalidCommand`.
+- Unknown wake-word commands return `InvalidCommand` rather than being treated as dictation.
+
+All other catalog entries remain planned and must not be described as implemented.
+
 ## Pie-chart slots
 
 Required:
@@ -113,4 +125,3 @@ The user may configure:
 - Every grammar change increments this document's draft version.
 - Every supported intent requires positive, negative and ambiguous test phrases.
 - Existing phrases must not change behavior silently; deliberate breaking changes require a migration note in `PROJECT_LOG.md`.
-

@@ -150,6 +150,27 @@ If a verification cannot run, `PROJECT_LOG.md` must record the exact reason. Do 
 - `docs/VIVA_NOTES.md`: defensible design decisions and short answers.
 - `outputs/VoxBox_Review_Meeting_1.pptx`: initial review presentation.
 
+## Current implementation baseline — 2026-07-19
+
+Implemented and verified:
+
+- Native Android `SpeechRecognizer` controller with lifecycle cleanup.
+- On-device recognizer preference and automatic system-recognizer fallback when the on-device language is unavailable.
+- System fallback does not force the offline preference and clearly discloses that recognition may use network service.
+- Runtime microphone permission request plus permission-denied and granted UI states.
+- Partial/final transcript callbacks, stop/cancel actions and mapped speech errors.
+- Compose capture screen with status, transcript, accessible microphone control and dark-theme verification.
+- Deterministic parser support for plain dictation, heading, bullet point and pie-chart commands.
+- Editable-preview concept demonstrated with the requested 25% yellow `wheat` chart.
+- Seven parser unit tests covering positive and invalid cases.
+
+Not implemented yet:
+
+- Persistent notes, block editing, Room, search or organization.
+- Remaining VoxScript intents, full chart set and diagrams.
+- AI provider, summarization or custom AI instruction.
+- Measured speech word error rate or spoken-command accuracy corpus.
+
 ## Source-control policy
 
 - The repository root is `D:\College Project` so documentation, the Android application and review artifacts stay synchronized.
@@ -163,4 +184,3 @@ If a verification cannot run, `PROJECT_LOG.md` must record the exact reason. Do 
 - [Android RecognizerIntent](https://developer.android.com/reference/android/speech/RecognizerIntent)
 - [Request runtime permissions](https://developer.android.com/training/permissions/requesting)
 - [Android architecture recommendations](https://developer.android.com/topic/architecture/recommendations)
-

@@ -62,6 +62,7 @@ This file is append-only. New entries go at the end. Existing entries may be cor
 - Added `docs/REPORT_DRAFT.md`.
 - Added `docs/VIVA_NOTES.md`.
 - Added a root `.gitignore` protecting local configuration, credentials, keystores and build artifacts.
+- Updated the existing daily automation in place to continue VoxBox at 7:00 PM Asia/Calcutta without creating a duplicate.
 
 ### Implementation status
 
@@ -94,3 +95,49 @@ This file is append-only. New entries go at the end. Existing entries may be cor
 
 - The connected device is now available for subsequent feature checks.
 - The application still contains only the starter greeting. No VoxBox feature has been implemented yet.
+
+## 2026-07-19 — Native speech and starter VoxScript milestone completed
+
+### Implemented
+
+- Added `RECORD_AUDIO` permission and Android speech-service query.
+- Added `SpeechRecognitionController` using `SpeechRecognizer` on the main thread with partial/final results, stop, cancel, error mapping and `destroy()` cleanup.
+- Added on-device recognizer preference when Android reports it available.
+- Added automatic fallback to the Android system recognizer when the on-device language is unsupported/unavailable.
+- Separated intents so the on-device recognizer receives the offline preference while the system fallback may use its network service.
+- Added `VoiceCaptureViewModel` with immutable `StateFlow` UI state.
+- Replaced the starter greeting with a Compose capture/status/transcript screen.
+- Added a no-AI notice and a deterministic sample button.
+- Added VoxScript parsing for plain dictation, headings, bullet points and pie charts.
+- Added native Compose pie-chart preview for `Tejas pie chart 25 percent yellow label wheat`.
+
+### Defects found during verification and corrected
+
+- Replaced unsupported Kotlin `assertIs` calls with JUnit 4 assertions.
+- Corrected command matching so `bullet point` is matched before the shorter `bullet` alias.
+- Physical-device testing showed that the reported on-device recognizer lacked the selected language; added system fallback.
+- Physical-device testing then showed the fallback still received `EXTRA_PREFER_OFFLINE`; separated on-device and system recognition intents.
+- Corrected microphone-card, button and cancel-control contrast in dark theme.
+
+### Verification pass 1 — automated
+
+- Command: `gradlew.bat testDebugUnitTest assembleDebug`.
+- Result: **BUILD SUCCESSFUL**.
+- Seven unit tests passed in total: six VoxScript cases plus the generated starter test.
+
+### Verification pass 2 — physical device
+
+- Installed the exact final debug APK on `2411DRN47I`, Android 16 / API 36.
+- Verified microphone-denied and microphone-granted states.
+- Verified Android initially selected the on-device recognizer and automatically changed to the system fallback after the unavailable-language error.
+- Verified the final system-recognizer state displays `Listening…`, `Stop listening` and `Cancel session` with the microphone privacy indicator active.
+- Verified the deterministic sample renders a 25% yellow wheat pie chart and a 75% white remainder.
+- Final UI hierarchy and screenshots are stored under `evidence/speech-milestone/`.
+
+### Honest limitation
+
+- The device test verified recognizer activation and callbacks/state handling but did not record a human-spoken phrase during automated ADB control. A versioned human speech corpus and word error rate remain future evaluation work.
+
+### Git status before commit
+
+- This milestone is ready for a focused commit after documentation synchronization.
