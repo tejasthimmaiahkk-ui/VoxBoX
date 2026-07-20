@@ -77,6 +77,12 @@ The deterministic sample `Tejas pie chart 25 percent yellow label wheat` produce
 
 Screenshots and UI hierarchies are stored under `evidence/speech-milestone/`.
 
+### 9.2 Local persistence foundation
+
+The next offline-core increment introduced a Room database with separate local `Note` and ordered `NoteBlock` tables. Each block retains a typed kind rather than flattening structured output into one text field. The current mapping stores plain dictation as a paragraph, headings and bullets as their respective text-block kinds, and pie charts with separate percentage, color and label values. Invalid VoxScript commands deliberately have no persistence mapping.
+
+The library shell can create a local voice note and save an accepted preview as a block. The debug unit-test, APK-assembly and lint tasks passed after Room schema generation. On 20 July 2026, the final debug APK was installed on the `2411DRN47I` (Android 16 / API 36): a `Voice note 1` saved the deterministic 25% yellow wheat chart, then remained listed after force-close and relaunch. The device-private Room database, WAL and SHM files were also present. The current shell does not yet reopen individual blocks for detail rendering, so that is a documented next milestone rather than an unverified claim.
+
 ## 10. Conclusion
 
 Pending final evaluation.

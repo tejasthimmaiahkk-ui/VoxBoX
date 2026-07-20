@@ -141,3 +141,52 @@ This file is append-only. New entries go at the end. Existing entries may be cor
 ### Git status before commit
 
 - This milestone is ready for a focused commit after documentation synchronization.
+
+## 2026-07-19 â€” Room note/block persistence foundation implemented
+
+### Implemented
+
+- Added Room 2.7.2 with KSP-based code generation, using the compatibility setting required by the project's AGP built-in Kotlin mode.
+- Added local `Note` and ordered `NoteBlock` tables, foreign-key cascade deletion, a Room DAO and repository boundary.
+- Added deterministic mapping from accepted VoxScript previews to typed persisted blocks: paragraph, heading, bullet point and pie chart. Pie-chart percentage, color and label remain separate columns for future editing.
+- Added a Compose local-library shell: create a note and save an accepted preview as a block. Invalid commands remain unsaveable.
+- Added four unit tests for the mapping contract, including the no-save rule for invalid commands.
+
+### Verification pass 1 â€” automated build, tests and lint
+
+- Command: `gradlew.bat testDebugUnitTest assembleDebug lintDebug --console=plain`.
+- Result: **BUILD SUCCESSFUL** in 1m 57s; 53 actionable tasks, 22 executed. Room schema generation, debug compilation, unit tests, APK assembly and lint all completed. Lint report: `VoxBox/app/build/reports/lint-results-debug.html`.
+
+### Verification pass 2 â€” physical device
+
+- Command: `C:\Users\tejas\AppData\Local\Android\Sdk\platform-tools\adb.exe devices -l`.
+- Result: **blocked**. The command reported no attached devices, so install/launch, save, force-close/relaunch and reopen checks could not be run.
+- Required follow-up: reconnect the previously verified `2411DRN47I`, install the assembled debug APK, save a preview, force-close/relaunch, then verify the note and ordered block remain visible.
+
+### Source-control status
+
+- No commit was created in this run. The project rule requires device verification for an Android persistence milestone before it is accepted and committed.
+
+## 2026-07-20 — Room persistence milestone accepted on physical device
+
+### Verification pass 1 — automated regression
+
+- Command: `gradlew.bat testDebugUnitTest assembleDebug --console=plain`.
+- Result: **BUILD SUCCESSFUL**. The debug unit-test task and fresh debug APK assembly completed successfully after the Room changes. The prior milestone lint run remains recorded above.
+
+### Verification pass 2 — physical device save/relaunch
+
+- Device: `2411DRN47I` (`5dfb3db8`), Android 16 / API 36.
+- Installed `VoxBox/app/build/outputs/apk/debug/app-debug.apk`, created `Voice note 1`, loaded `Tejas pie chart 25 percent yellow label wheat`, and saved the preview.
+- Before restart, the UI hierarchy reported `pie chart saved locally.`, `1 saved note`, and `Voice note 1`.
+- Force-stopped `me.thimmaiah.voxbox` and relaunched it. The fresh UI hierarchy still reported `1 saved note` and `Voice note 1`.
+- `run-as me.thimmaiah.voxbox ls -l databases` confirmed the Room database and WAL/SHM files at the time of verification.
+- Command/UI evidence and a concise reproduction record are in `evidence/persistence-milestone/README.md`.
+
+### Honest scope boundary
+
+- This shell shows the persisted note title, not a note-detail renderer. The save status plus post-relaunch note count/title verify the completed persistence foundation; reopening and visually rendering individual stored blocks remains the next editor milestone.
+
+### Source-control status
+
+- The persistence milestone passed both required verification modes and is ready for a focused commit.

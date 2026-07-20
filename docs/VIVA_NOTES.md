@@ -55,6 +55,8 @@ The demonstration does not depend on AI. The scope is bounded to a single-user l
 - Android initially reports an on-device recognizer on `2411DRN47I`, but the selected language is unavailable; VoxBox now falls back to the system recognizer and discloses possible network use.
 - Plain dictation, heading, bullet and pie-chart parsing are implemented and unit-tested.
 - The 25% yellow wheat chart preview is verified on the physical device.
-- Room persistence, the full editor/organization layer, remaining commands and AI are not implemented.
+- Room now persists local notes and ordered typed blocks; accepted dictation, heading, bullet and pie-chart previews can be saved from the library shell. Full block editing, note-detail reopening and organization/search are still pending.
+- The Room build, unit-test and lint pass is complete. On `2411DRN47I` (Android 16 / API 36), a saved 25% yellow wheat pie-chart note survived force-close and relaunch; Room database files were also present. Note-detail rendering of saved blocks is still pending.
+- Remaining commands and AI are not implemented.
 - Human-spoken transcription metrics are not available yet; the device pass verified activation/state handling, not word error rate.
 - No accuracy result is available yet.

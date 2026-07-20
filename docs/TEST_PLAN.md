@@ -102,3 +102,12 @@ Each runnable milestone uses two relevant forms of evidence: an automated check 
 - Requested 25% yellow wheat chart preview: passed visually and through UI hierarchy.
 - Human-spoken phrase transcription and word error rate: pending; automated ADB control did not supply microphone speech.
 - Room persistence, full editor, organization and remaining command tests: pending.
+
+## 2026-07-19/20 persistence-foundation evidence
+
+- Room schema generation, unit tests, debug APK assembly and Android lint passed with `gradlew.bat testDebugUnitTest assembleDebug lintDebug` (53 actionable tasks; 22 executed).
+- The unit suite now includes four mapping cases: dictation, heading, pie-chart editable slots and rejection of invalid commands.
+- Repeated `gradlew.bat testDebugUnitTest assembleDebug --console=plain` on 2026-07-20: **BUILD SUCCESSFUL**.
+- Physical-device persistence/relaunch verification passed on `2411DRN47I`, Android 16 / API 36. A newly created `Voice note 1` accepted the deterministic yellow 25% wheat pie-chart preview; the UI reported `pie chart saved locally.` before force-stop and still reported `1 saved note` / `Voice note 1` after relaunch.
+- The device-private `voxbox-notes.db`, WAL and SHM files were present after the flow. Detailed reproduction evidence: `evidence/persistence-milestone/README.md`.
+- Note-detail block rendering is not implemented, so the UI persistence claim is deliberately limited to the stored-note shell and save status; detailed block reopening is a future test case.

@@ -48,6 +48,8 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import me.thimmaiah.voxbox.speech.VoiceCaptureUiState
 import me.thimmaiah.voxbox.speech.VoiceCaptureViewModel
+import me.thimmaiah.voxbox.notes.NoteLibraryUiState
+import me.thimmaiah.voxbox.notes.NoteLibraryViewModel
 import me.thimmaiah.voxbox.voxscript.VoxScriptResult
 
 private val VoxBlue = Color(0xFF2563EB)
@@ -56,6 +58,8 @@ private val VoxBlueSoft = Color(0xFFEAF2FF)
 @Composable
 fun VoxBoxScreen(viewModel: VoiceCaptureViewModel = viewModel()) {
     val state by viewModel.uiState.collectAsState()
+    val noteLibraryViewModel: NoteLibraryViewModel = viewModel()
+    val noteLibraryState by noteLibraryViewModel.uiState.collectAsState()
     val context = LocalContext.current
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
@@ -80,6 +84,10 @@ fun VoxBoxScreen(viewModel: VoiceCaptureViewModel = viewModel()) {
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Header(state)
+            NoteLibraryCard(
+                state = noteLibraryState,
+                onCreateNote = noteLibraryViewModel::createNote,
+            )
             PermissionAndRecognizerCard(state)
             CaptureCard(
                 state = state,
@@ -93,7 +101,16 @@ fun VoxBoxScreen(viewModel: VoiceCaptureViewModel = viewModel()) {
                 onCancel = viewModel::cancelListening,
             )
             TranscriptCard(state)
-            state.structuredResult?.let { StructuredPreview(it) }
+            state.structuredResult?.let { result ->
+                StructuredPreview(result)
+                Button(
+                    onClick = { noteLibraryViewModel.savePreview(result) },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = result !is VoxScriptResult.InvalidCommand,
+                ) {
+                    Text("Save preview as a note block")
+                }
+            }
             OutlinedButton(
                 onClick = viewModel::loadExample,
                 modifier = Modifier.fillMaxWidth(),
@@ -106,6 +123,37 @@ fun VoxBoxScreen(viewModel: VoiceCaptureViewModel = viewModel()) {
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(bottom = 12.dp),
             )
+        }
+    }
+}
+
+@Composable
+private fun NoteLibraryCard(
+    state: NoteLibraryUiState,
+    onCreateNote: () -> Unit,
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column {
+                    Text("Local note library", fontWeight = FontWeight.Bold)
+                    Text(
+                        "${state.notes.size} saved note${if (state.notes.size == 1) "" else "s"}",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                OutlinedButton(onClick = onCreateNote) {
+                    Text("New note")
+                }
+            }
+            Text(state.status, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            state.notes.take(3).forEach { note ->
+                Text("• ${note.title}", fontWeight = FontWeight.Medium)
+            }
         }
     }
 }

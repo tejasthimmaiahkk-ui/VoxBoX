@@ -163,10 +163,14 @@ Implemented and verified:
 - Deterministic parser support for plain dictation, heading, bullet point and pie-chart commands.
 - Editable-preview concept demonstrated with the requested 25% yellow `wheat` chart.
 - Seven parser unit tests covering positive and invalid cases.
+- Room-backed local `Note` and ordered `NoteBlock` tables with cascade deletion and stable per-note positions.
+- A local note-library shell that creates notes and saves dictation, heading, bullet and pie-chart previews as typed blocks.
+- Four block-mapping unit tests that prevent invalid commands from entering persistence.
+- Physical-device persistence verification: a locally saved pie-chart block and its parent note survive force-close and relaunch on the test device.
 
 Not implemented yet:
 
-- Persistent notes, block editing, Room, search or organization.
+- Full block editing, note-detail rendering, search or organization. The library currently proves note persistence but does not yet reopen and render individual saved blocks.
 - Remaining VoxScript intents, full chart set and diagrams.
 - AI provider, summarization or custom AI instruction.
 - Measured speech word error rate or spoken-command accuracy corpus.

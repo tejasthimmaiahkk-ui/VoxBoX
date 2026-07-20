@@ -1,6 +1,6 @@
 # VoxScript Specification
 
-Status: Draft 0.2
+Status: Draft 0.3
 Date: 2026-07-19
 
 ## Purpose
@@ -72,6 +72,17 @@ ParseResult
 - Unknown wake-word commands return `InvalidCommand` rather than being treated as dictation.
 
 All other catalog entries remain planned and must not be described as implemented.
+
+## Persistence integration in Draft 0.3
+
+The current Android baseline maps accepted parser results to local typed blocks before saving:
+
+- plain dictation → `PARAGRAPH`;
+- heading → `HEADING`;
+- bullet point → `BULLET_POINT`;
+- pie chart → `PIE_CHART`, preserving its percentage, color and label as separate editable fields.
+
+`InvalidCommand` has no persistence mapping, so an incomplete command cannot create a saved block. The initial Room schema assigns each block a stable position within one local note. On-device verification has confirmed that an accepted pie-chart preview can be saved and its parent note survives relaunch; full typed editing and note-detail reopening remain planned.
 
 ## Pie-chart slots
 
