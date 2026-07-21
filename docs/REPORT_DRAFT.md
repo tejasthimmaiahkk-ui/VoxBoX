@@ -83,6 +83,12 @@ The next offline-core increment introduced a Room database with separate local `
 
 The library shell can create a local voice note and save an accepted preview as a block. The debug unit-test, APK-assembly and lint tasks passed after Room schema generation. On 20 July 2026, the final debug APK was installed on the `2411DRN47I` (Android 16 / API 36): a `Voice note 1` saved the deterministic 25% yellow wheat chart, then remained listed after force-close and relaunch. The device-private Room database, WAL and SHM files were also present. The current shell does not yet reopen individual blocks for detail rendering, so that is a documented next milestone rather than an unverified claim.
 
+### 9.3 Read-only note-detail recovery
+
+The next increment added a read-only detail view for saved notes. It observes blocks for the selected note in ascending stored position and projects only recognized, well-formed typed rows into the renderer. Paragraphs, headings, bullet points and pie charts use their own display paths. In particular, a saved pie chart reads its percentage, named color and label from the separate Room columns rather than reparsing the original transcript; malformed visual data is shown as unavailable instead of being silently converted.
+
+The debug unit tests, APK assembly and lint task passed on 21 July 2026. On the physical `2411DRN47I` device (Android 16 / API 36), `Voice note 5` saved the deterministic yellow 25% wheat chart, survived force-stop/relaunch, and reopened from the library. The detail UI displayed `Wheat`, `25%`, and `yellow • remainder white`, confirming typed payload recovery as well as note-list persistence. The current detail mode is intentionally read-only; editing, delete and reorder controls are reserved for a later milestone.
+
 ## 10. Conclusion
 
 Pending final evaluation.

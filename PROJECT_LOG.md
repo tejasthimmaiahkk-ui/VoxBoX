@@ -190,3 +190,32 @@ This file is append-only. New entries go at the end. Existing entries may be cor
 ### Source-control status
 
 - The persistence milestone passed both required verification modes and is ready for a focused commit.
+
+## 2026-07-21 — Read-only note-detail reopening completed
+
+### Implemented
+
+- Added a Room-backed ordered-block observer and repository exposure for one selected note; no schema migration was required.
+- Added a read-only projection that renders persisted paragraph, heading, bullet-point and pie-chart blocks by their saved typed kind.
+- Pie charts reopen from their stored percentage, color and label fields rather than reparsing source text. Unknown types or malformed chart values are not silently reinterpreted.
+- Added accessible `Open` actions in the local library and a selected-note detail area. The scope message explicitly keeps stored-block editing out of this milestone.
+- Added two local unit tests for the stored pie-chart projection and defensive malformed-chart behavior.
+
+### Verification pass 1 — automated regression
+
+- Command: `gradlew.bat testDebugUnitTest assembleDebug lintDebug --console=plain`.
+- Result: **BUILD SUCCESSFUL** in 28s; 53 actionable tasks, 16 executed. Unit tests, Room/KSP compilation, debug APK assembly and lint completed with no compiler warnings in the final run.
+
+### Verification pass 2 — physical-device save, relaunch and reopen
+
+- Device: `2411DRN47I` (`5dfb3db8`), Android 16 / API 36.
+- Installed the exact final debug APK, created `Voice note 5`, loaded and saved `Tejas pie chart 25 percent yellow label wheat`.
+- Force-stopped and relaunched `me.thimmaiah.voxbox`. The library reported `5 saved notes` and listed `Voice note 5` first.
+- Used `Open` for `Voice note 5`. The UI reported the read-only reopening status and rendered `Wheat`, `25%`, and `yellow • remainder white` from the saved Room block.
+- Full command and result record: `evidence/note-detail-milestone/README.md`.
+
+### Scope boundary and source-control status
+
+- This accepted milestone proves read-only recovery/rendering of the currently implemented types. Editing, deletion, reordering, search and organization remain unimplemented.
+- No new review-slide claim is needed for the historical Review-1 deck; the current report, test plan and viva notes carry the new verified evidence for a later review.
+- The milestone has passed both required verification modes and is ready for one focused commit.

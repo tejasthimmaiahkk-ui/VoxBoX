@@ -7,15 +7,22 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import me.thimmaiah.voxbox.voxscript.VoxScriptResult
 
 data class NoteLibraryUiState(
     val notes: List<NoteEntity> = emptyList(),
     val activeNoteId: String? = null,
+    val activeBlocks: List<NoteBlockEntity> = emptyList(),
     val status: String = "Create a note to save structured speech.",
 )
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class NoteLibraryViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = RoomNoteRepository(NoteDatabase.get(application).noteDao())
     private val _uiState = MutableStateFlow(NoteLibraryUiState())
@@ -27,6 +34,17 @@ class NoteLibraryViewModel(application: Application) : AndroidViewModel(applicat
                 _uiState.value = _uiState.value.copy(notes = notes)
             }
         }
+        viewModelScope.launch {
+            _uiState
+                .map { it.activeNoteId }
+                .distinctUntilChanged()
+                .flatMapLatest { noteId ->
+                    if (noteId == null) flowOf(emptyList()) else repository.observeBlocks(noteId)
+                }
+                .collectLatest { blocks ->
+                    _uiState.value = _uiState.value.copy(activeBlocks = blocks)
+                }
+        }
     }
 
     fun createNote() {
@@ -37,6 +55,14 @@ class NoteLibraryViewModel(application: Application) : AndroidViewModel(applicat
                 status = "${note.title} is ready for blocks.",
             )
         }
+    }
+
+    fun openNote(noteId: String) {
+        val note = _uiState.value.notes.firstOrNull { it.id == noteId } ?: return
+        _uiState.value = _uiState.value.copy(
+            activeNoteId = note.id,
+            status = "Opened ${note.title}. Saved blocks are read-only in this milestone.",
+        )
     }
 
     fun savePreview(result: VoxScriptResult) {

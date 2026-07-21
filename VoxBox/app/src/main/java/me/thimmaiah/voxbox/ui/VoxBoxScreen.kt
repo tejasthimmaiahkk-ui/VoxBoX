@@ -50,6 +50,9 @@ import me.thimmaiah.voxbox.speech.VoiceCaptureUiState
 import me.thimmaiah.voxbox.speech.VoiceCaptureViewModel
 import me.thimmaiah.voxbox.notes.NoteLibraryUiState
 import me.thimmaiah.voxbox.notes.NoteLibraryViewModel
+import me.thimmaiah.voxbox.notes.NoteBlockEntity
+import me.thimmaiah.voxbox.notes.ReadOnlyNoteBlock
+import me.thimmaiah.voxbox.notes.toReadOnlyBlockOrNull
 import me.thimmaiah.voxbox.voxscript.VoxScriptResult
 
 private val VoxBlue = Color(0xFF2563EB)
@@ -87,6 +90,7 @@ fun VoxBoxScreen(viewModel: VoiceCaptureViewModel = viewModel()) {
             NoteLibraryCard(
                 state = noteLibraryState,
                 onCreateNote = noteLibraryViewModel::createNote,
+                onOpenNote = noteLibraryViewModel::openNote,
             )
             PermissionAndRecognizerCard(state)
             CaptureCard(
@@ -131,6 +135,7 @@ fun VoxBoxScreen(viewModel: VoiceCaptureViewModel = viewModel()) {
 private fun NoteLibraryCard(
     state: NoteLibraryUiState,
     onCreateNote: () -> Unit,
+    onOpenNote: (String) -> Unit,
 ) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -152,9 +157,56 @@ private fun NoteLibraryCard(
             }
             Text(state.status, color = MaterialTheme.colorScheme.onSurfaceVariant)
             state.notes.take(3).forEach { note ->
-                Text("• ${note.title}", fontWeight = FontWeight.Medium)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(note.title, fontWeight = FontWeight.Medium)
+                    OutlinedButton(onClick = { onOpenNote(note.id) }) {
+                        Text("Open")
+                    }
+                }
+            }
+            val activeNote = state.notes.firstOrNull { it.id == state.activeNoteId }
+            if (activeNote != null) {
+                SavedNoteDetail(activeNote.title, state.activeBlocks)
             }
         }
+    }
+}
+
+@Composable
+private fun SavedNoteDetail(title: String, blocks: List<NoteBlockEntity>) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("Saved note", color = VoxBlue, fontWeight = FontWeight.Bold)
+        Text(title, fontSize = 22.sp, fontWeight = FontWeight.Black)
+        if (blocks.isEmpty()) {
+            Text("No saved blocks yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else {
+            blocks.forEach { block ->
+                ReadOnlyBlock(block.toReadOnlyBlockOrNull(), block.position)
+            }
+        }
+        Text(
+            "Read-only reopening is verified here; block editing is the next editor milestone.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun ReadOnlyBlock(block: ReadOnlyNoteBlock?, position: Int) {
+    when (block) {
+        is ReadOnlyNoteBlock.Paragraph -> Text(block.text)
+        is ReadOnlyNoteBlock.Heading -> Text(block.text, fontSize = 28.sp, fontWeight = FontWeight.Black)
+        is ReadOnlyNoteBlock.BulletPoint -> Text("• ${block.text}", fontSize = 20.sp)
+        is ReadOnlyNoteBlock.PieChart -> PieChartVisual(block.percentage, block.color, block.label)
+        null -> Text(
+            "Saved block ${position + 1} cannot be displayed because its data is incomplete.",
+            color = MaterialTheme.colorScheme.error,
+        )
     }
 }
 
@@ -313,7 +365,12 @@ private fun StructuredPreview(result: VoxScriptResult) {
 
 @Composable
 private fun PieChartPreview(result: VoxScriptResult.PieChart) {
-    val sliceColor = namedColor(result.color)
+    PieChartVisual(result.percentage, result.color, result.label)
+}
+
+@Composable
+private fun PieChartVisual(percentage: Int, colorName: String, label: String) {
+    val sliceColor = namedColor(colorName)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(20.dp),
@@ -329,16 +386,16 @@ private fun PieChartPreview(result: VoxScriptResult.PieChart) {
                 drawArc(
                     color = sliceColor,
                     startAngle = -90f,
-                    sweepAngle = 360f * result.percentage / 100f,
+                    sweepAngle = 360f * percentage / 100f,
                     useCenter = true,
                 )
                 drawCircle(Color(0xFF9CA3AF), style = Stroke(width = 2.dp.toPx()))
             }
         }
         Column {
-            Text(result.label.replaceFirstChar { it.titlecase() }, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            Text("${result.percentage}%", fontSize = 34.sp, fontWeight = FontWeight.Black, color = sliceColor)
-            Text("${result.color} • remainder white", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(label.replaceFirstChar { it.titlecase() }, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            Text("${percentage}%", fontSize = 34.sp, fontWeight = FontWeight.Black, color = sliceColor)
+            Text("${colorName} • remainder white", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

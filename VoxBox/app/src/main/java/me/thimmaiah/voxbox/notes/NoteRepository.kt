@@ -5,6 +5,7 @@ import java.util.UUID
 
 interface NoteRepository {
     fun observeNotes(): Flow<List<NoteEntity>>
+    fun observeBlocks(noteId: String): Flow<List<NoteBlockEntity>>
     suspend fun createNote(title: String): NoteEntity
     suspend fun appendBlock(noteId: String, block: NewNoteBlock)
 }
@@ -14,6 +15,8 @@ class RoomNoteRepository(
     private val clock: () -> Long = System::currentTimeMillis,
 ) : NoteRepository {
     override fun observeNotes(): Flow<List<NoteEntity>> = dao.observeNotes()
+
+    override fun observeBlocks(noteId: String): Flow<List<NoteBlockEntity>> = dao.observeBlocks(noteId)
 
     override suspend fun createNote(title: String): NoteEntity {
         val now = clock()

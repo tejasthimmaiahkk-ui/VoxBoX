@@ -12,6 +12,9 @@ interface NoteDao {
     @Query("SELECT * FROM notes ORDER BY updatedAt DESC")
     fun observeNotes(): Flow<List<NoteEntity>>
 
+    @Query("SELECT * FROM note_blocks WHERE noteId = :noteId ORDER BY position ASC")
+    fun observeBlocks(noteId: String): Flow<List<NoteBlockEntity>>
+
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertNote(note: NoteEntity)
 

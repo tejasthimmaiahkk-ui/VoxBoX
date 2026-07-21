@@ -1,7 +1,7 @@
 # VoxScript Specification
 
-Status: Draft 0.3
-Date: 2026-07-19
+Status: Draft 0.4
+Date: 2026-07-21
 
 ## Purpose
 
@@ -82,7 +82,7 @@ The current Android baseline maps accepted parser results to local typed blocks 
 - bullet point → `BULLET_POINT`;
 - pie chart → `PIE_CHART`, preserving its percentage, color and label as separate editable fields.
 
-`InvalidCommand` has no persistence mapping, so an incomplete command cannot create a saved block. The initial Room schema assigns each block a stable position within one local note. On-device verification has confirmed that an accepted pie-chart preview can be saved and its parent note survives relaunch; full typed editing and note-detail reopening remain planned.
+`InvalidCommand` has no persistence mapping, so an incomplete command cannot create a saved block. The initial Room schema assigns each block a stable position within one local note. The library can reopen a saved note and renders the implemented paragraph, heading, bullet-point and pie-chart kinds read-only in ascending stored position. Pie-chart reopening uses the separately stored percentage, color and label slots; malformed visual rows are disclosed instead of guessed. On-device verification has confirmed a saved pie-chart block survives relaunch and reopens with those slots rendered. Full typed editing remains planned.
 
 ## Pie-chart slots
 

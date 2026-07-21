@@ -168,9 +168,11 @@ Implemented and verified:
 - Four block-mapping unit tests that prevent invalid commands from entering persistence.
 - Physical-device persistence verification: a locally saved pie-chart block and its parent note survive force-close and relaunch on the test device.
 
+- Physical-device note-detail verification: a saved pie-chart block survives relaunch and reopens with its stored label, percentage and color rendered from Room.
+
 Not implemented yet:
 
-- Full block editing, note-detail rendering, search or organization. The library currently proves note persistence but does not yet reopen and render individual saved blocks.
+- Full block editing, search or organization. The library now reopens saved notes and renders the implemented typed blocks read-only; editing, deletion and reordering remain planned.
 - Remaining VoxScript intents, full chart set and diagrams.
 - AI provider, summarization or custom AI instruction.
 - Measured speech word error rate or spoken-command accuracy corpus.

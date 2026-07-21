@@ -110,4 +110,12 @@ Each runnable milestone uses two relevant forms of evidence: an automated check 
 - Repeated `gradlew.bat testDebugUnitTest assembleDebug --console=plain` on 2026-07-20: **BUILD SUCCESSFUL**.
 - Physical-device persistence/relaunch verification passed on `2411DRN47I`, Android 16 / API 36. A newly created `Voice note 1` accepted the deterministic yellow 25% wheat pie-chart preview; the UI reported `pie chart saved locally.` before force-stop and still reported `1 saved note` / `Voice note 1` after relaunch.
 - The device-private `voxbox-notes.db`, WAL and SHM files were present after the flow. Detailed reproduction evidence: `evidence/persistence-milestone/README.md`.
-- Note-detail block rendering is not implemented, so the UI persistence claim is deliberately limited to the stored-note shell and save status; detailed block reopening is a future test case.
+- Note-detail block rendering was not implemented in the persistence-foundation milestone, so that milestone's UI claim was deliberately limited to the stored-note shell and save status.
+
+## 2026-07-21 note-detail reopening evidence
+
+- `gradlew.bat testDebugUnitTest assembleDebug lintDebug --console=plain` passed: unit tests, fresh debug APK assembly and lint all completed successfully.
+- Two local unit tests verify that a persisted pie chart reopens with its typed percentage/color/label slots and that an out-of-range malformed chart is not rendered as another block kind.
+- On `2411DRN47I` (Android 16 / API 36), `Voice note 5` saved the deterministic yellow 25% wheat chart, survived force-stop/relaunch, and then reopened through the new `Open` action. The detail UI rendered `Wheat`, `25%`, and `yellow • remainder white` from the saved Room row.
+- Detailed command/device reproduction: `evidence/note-detail-milestone/README.md`.
+- Editing, deletion and reordering of stored blocks remain pending and are not represented as passed cases.
