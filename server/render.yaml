@@ -1,0 +1,35 @@
+# Render blueprint for the VoxBox proxy.
+#
+# Secrets are deliberately declared with `sync: false`, which means Render prompts for them in the
+# dashboard and never stores them in this file or in Git.
+services:
+  - type: web
+    name: voxbox-proxy
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+    envVars:
+      # Prompted once in the dashboard, then held in Render's secret store.
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: VOXBOX_CLIENT_TOKEN
+        sync: false
+
+      # Abuse limits. In-memory and per instance, which suits a single free-tier instance.
+      - key: VOXBOX_RATE_LIMIT_MAX
+        value: "60"
+      - key: VOXBOX_RATE_LIMIT_WINDOW_MS
+        value: "60000"
+      - key: VOXBOX_DAILY_REQUEST_BUDGET
+        value: "1500"
+
+      # Bind all interfaces; Render supplies PORT and terminates TLS.
+      - key: HOST
+        value: "0.0.0.0"
+
+      # Model overrides are optional. Leaving them unset uses the measured defaults in server.mjs.
+      # - key: VOXBOX_TRANSCRIPTION_MODEL
+      #   value: google/gemini-3.1-flash-lite

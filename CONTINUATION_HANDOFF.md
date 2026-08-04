@@ -256,47 +256,44 @@ Start the mock proxy first (`cd server && MOCK_AI=1 node server.mjs`) and run
    and additional frame cadences.
 5. Then continue with the corpus, endurance and YouTube work, which remain untouched.
 
-## Next development goal — normal wireless use
+## Wireless deployment — ready to deploy
 
-Target stated 2026-08-04: deploy the proxy to an authenticated HTTPS server and build the app against
-that URL, so ordinary use needs **no USB cable, no `adb reverse` and no laptop proxy terminal**, while
-the OpenAI key stays on the hosted server and never enters the APK.
+Target: ordinary use with **no USB cable, no `adb reverse` and no laptop proxy terminal**, with the
+provider key on the server and never in the APK. Everything on the code side is now done; the
+remaining steps are account-level and are yours to run.
 
-### Already in place
+Follow `server/DEPLOYMENT.md`. Summary:
 
-- Release builds require an absolute HTTPS `VOXBOX_API_BASE_URL`, supplied as a Gradle property or
-  environment variable. `validateVoxBoxReleaseApiBaseUrl` runs before `preReleaseBuild` and rejects a
-  missing value, a non-HTTPS scheme, embedded credentials, a query or a fragment.
-- `validatedVoxBoxUrl` repeats those checks at runtime and additionally rejects the unconfigured
-  `invalid.voxbox.local` placeholder outside debug builds.
-- The APK has never contained an OpenAI key, and the proxy forwards media in memory without writing it
-  to disk or enabling provider-side storage.
+1. Deploy `server/` to Render (blueprint provided in `server/render.yaml`), Google Cloud Run, or
+   Fly.io. All three have a $0 tier adequate for a demo. `server/Dockerfile` works on all three.
+2. Paste `OPENROUTER_API_KEY` and `VOXBOX_CLIENT_TOKEN` into the host's secret store.
+3. Run the three verification curls in the runbook. The unauthenticated one must return `401`.
+4. Build the release APK with `-PVOXBOX_API_BASE_URL=https://…` and `-PVOXBOX_CLIENT_TOKEN=…`,
+   install once over the cable, and the cable is no longer needed.
 
-### Blocking gap: the proxy has no end-user authentication
+The runbook's verification steps were checked against a locally started instance in the deployed
+configuration (`HOST=0.0.0.0`, live mode) and produced exactly the documented results: `/health` 200
+with `mode: live`, unauthenticated pipeline call `401`, authenticated call `400`, verify route `401`
+without a token.
 
-This is the one thing that must be solved before any public deployment. The proxy currently accepts any
-request that reaches it. Published on HTTPS as-is it becomes an **open relay to the project's OpenAI
-account**, and every call is billed to that account. `server/README.md` already records that the
-development proxy is loopback-only for exactly this reason.
+Not tested: the Docker image itself has never been built, because Docker is not installed on this
+machine. The first `docker build` may still surface something.
 
-Required before deploying:
+### Provider
 
-1. An authentication check on all three pipeline routes, rejecting unauthenticated requests before any
-   provider call or body parse beyond what validation needs.
-2. Per-client rate limiting and a request budget, so a leaked credential cannot drain the account.
-3. An Android client that sends the credential, with the release build supplying it the same way it
-   supplies the base URL — as a build-time property, never a committed file.
-4. Request logging and monitoring that records classification only, matching the existing rule that
-   bodies, media and credentials are never logged.
+The project runs on **OpenRouter**, not OpenAI. OpenAI was dropped because the account cannot be
+funded. All three pipelines use OpenRouter's OpenAI-compatible chat-completions API with strict
+json_schema, and a fourth endpoint performs the end-of-session check.
 
-### Honest constraint to design around
+Diarization is the one place where this cost something. OpenRouter's dedicated transcription endpoint
+returns no speaker labels, so diarization now comes from an audio-capable model bound to a diarized
+transcript schema. That is speaker segmentation inferred from the audio, not acoustic diarization
+with voice embeddings. It fits the existing "chunk-local, never an identity" framing, but it must be
+described that way and its accuracy on real classroom audio is unmeasured.
 
-Any credential shipped inside an APK is extractable by anyone who has the APK. A shared client token
-therefore raises the bar against casual abuse but is not a real secret. The realistic options are a
-shared build-time token plus a strict server-side budget and rate limit, accepting and documenting that
-limitation, or per-user sign-in so each device gets its own revocable token. The second is materially
-more work and needs an account model the project does not currently have. Whichever is chosen must be
-stated plainly in the report rather than described as securing the backend.
+### Honesty constraint for the report
 
-The OpenAI key itself is not affected by this: it stays in the hosting platform's secret store and is
-read only by the server process.
+The client token is compiled into the APK and is therefore extractable by anyone holding the APK. It
+deters casual abuse; it is not a real secret. The daily request budget is what actually bounds
+exposure. Do not describe the backend as secured by the token.
+
