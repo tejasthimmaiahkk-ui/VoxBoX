@@ -120,6 +120,17 @@ cd VoxBox
 Both are required. The build fails if the URL is missing, not HTTPS, or carries credentials, a query
 or a fragment, and if the token is missing, shorter than 24 characters, or contains whitespace.
 
+The release build is signed with the local **debug keystore** so it installs without any keystore
+setup. That is a coursework and device-testing convenience, not a distribution setup: the debug
+keystore is shared and unprotected, so this APK must never be published. A real release needs its own
+keystore with the password supplied outside version control.
+
+Uninstall any debug build first — the signatures differ and the install will otherwise be rejected:
+
+```bash
+adb uninstall me.thimmaiah.voxbox
+```
+
 Install it directly, because this handset blocks Gradle's split-session installer:
 
 ```bash

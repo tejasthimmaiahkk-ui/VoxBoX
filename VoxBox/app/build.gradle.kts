@@ -61,6 +61,12 @@ android {
             )
         }
         release {
+            // Signed with the local debug keystore so the release build is installable for
+            // coursework demos and device testing. This is deliberately NOT a distribution
+            // signing setup: the debug keystore is shared, unprotected and well known, so this
+            // APK must never be published. A real release needs its own keystore, with the
+            // password supplied outside version control.
+            signingConfig = signingConfigs.getByName("debug")
             buildConfigField(
                 "String",
                 "VOXBOX_API_BASE_URL",
