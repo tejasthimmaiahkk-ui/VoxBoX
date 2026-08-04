@@ -4,14 +4,93 @@ import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const VISION_MODEL = "gpt-5.6-sol";
-export const NOTE_MODEL = "gpt-5.6-terra";
-export const TRANSCRIPTION_MODEL = "gpt-4o-transcribe-diarize";
+// Model routing. Every role is overridable by environment variable so a model can be swapped
+// without a code change or a redeploy of the Android client.
+//
+// These defaults were chosen by measuring candidates against this project's own contracts rather
+// than by list price, and each pick is deliberate:
+//
+// - Transcription: the only measured model that returned correct speaker attribution *and* honest
+//   timestamps. Cheaper audio models fabricated offsets (one reported 8 s of segments for a 16.7 s
+//   clip), which would corrupt every transcript timestamp stored as evidence.
+// - Vision: produced by far the best normalized diagram crop (IoU 0.59 against a known rectangle,
+//   versus 0.32 for the next candidate), which is what the diagram-asset feature depends on. It is
+//   also cheaper than that runner-up.
+// - Notes: caught a planted factual contradiction *and* preserved the captured claim in the note
+//   body. A cheaper candidate caught the same error but silently deleted the original claim, which
+//   violates this project's rule that evidence is never rewritten without review.
+export const VISION_MODEL = process.env.VOXBOX_VISION_MODEL || "google/gemini-2.5-flash-lite";
+export const NOTE_MODEL = process.env.VOXBOX_NOTE_MODEL || "openai/gpt-oss-120b";
+export const TRANSCRIPTION_MODEL = process.env.VOXBOX_TRANSCRIPTION_MODEL || "google/gemini-3.1-flash-lite";
 // Compatibility export retained for the existing Android milestone tests/docs.
 export const MODEL = VISION_MODEL;
 
-const RESPONSES_URL = "https://api.openai.com/v1/responses";
-const TRANSCRIPTIONS_URL = "https://api.openai.com/v1/audio/transcriptions";
+export const PROVIDER_SOURCE = "openrouter";
+const CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions";
+
+/**
+ * Single OpenRouter chat-completions call returning schema-constrained JSON.
+ *
+ * OpenRouter exposes an OpenAI-compatible chat API rather than the Responses API, so all three
+ * pipelines share this one shape. `strict` json_schema keeps the response bound to the contracts
+ * this proxy already validates.
+ */
+async function callStructuredModel({ apiKey, model, kind, messages, schema, schemaName, maxTokens, timeoutMs, fetchImpl }) {
+  const upstream = await fetchImpl(CHAT_COMPLETIONS_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      // OpenRouter attribution headers; neither carries user content.
+      "HTTP-Referer": "https://github.com/voxbox/voxbox",
+      "X-Title": "VoxBox",
+    },
+    signal: AbortSignal.timeout(timeoutMs),
+    body: JSON.stringify({
+      model,
+      max_tokens: maxTokens,
+      messages,
+      response_format: {
+        type: "json_schema",
+        json_schema: { name: schemaName, strict: true, schema },
+      },
+      // OpenRouter load-balances one model id across several upstream providers. Without this,
+      // a request can land on a provider that ignores response_format and aborts mid-generation,
+      // which surfaced as truncated JSON. Restrict routing to providers that honour every
+      // parameter sent.
+      provider: { require_parameters: true },
+    }),
+  });
+  if (!upstream.ok) throw await providerFailure(kind, upstream);
+  const payload = await upstream.json();
+  const choice = payload?.choices?.[0];
+  // An incomplete completion yields JSON that can never parse. Report why it was incomplete
+  // instead of letting it surface as "invalid JSON", which sends diagnosis the wrong way.
+  const finish = choice?.finish_reason;
+  if (finish === "length" || choice?.native_finish_reason === "MAX_TOKENS") {
+    throw new RequestError(
+      502,
+      "upstream_output_truncated",
+      `The ${kind} model hit its output limit before completing the response.`,
+      { retryable: true },
+    );
+  }
+  if (finish && finish !== "stop" && finish !== "tool_calls") {
+    // Observed live as finish_reason "error": the upstream aborted part-way and returned a
+    // half-written object.
+    throw new RequestError(
+      502,
+      "upstream_generation_failed",
+      `The ${kind} model stopped early (${String(finish).slice(0, 40)}).`,
+      { retryable: true },
+    );
+  }
+  const text = choice?.message?.content;
+  if (typeof text !== "string" || text.trim().length === 0) {
+    throw new RequestError(502, "invalid_upstream_response", `The ${kind} model returned no text output.`);
+  }
+  return text;
+}
 const MAX_BODY_BYTES = 14 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
@@ -586,16 +665,6 @@ function validateNoteInput(body) {
   };
 }
 
-function extractOutputText(payload) {
-  if (typeof payload?.output_text === "string") return payload.output_text;
-  for (const item of payload?.output ?? []) {
-    for (const content of item?.content ?? []) {
-      if (content?.type === "output_text" && typeof content.text === "string") return content.text;
-    }
-  }
-  return null;
-}
-
 function assertStringList(value, name) {
   if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
     throw new RequestError(502, "invalid_upstream_response", `${name} must be a string list.`);
@@ -633,13 +702,34 @@ function validateCorrectionsAndEvidence(value, request) {
   }
 }
 
-function parseBoardExtraction(text) {
-  let value;
-  try {
-    value = JSON.parse(text);
-  } catch {
-    throw new RequestError(502, "invalid_upstream_response", "Vision provider returned invalid JSON.");
+/**
+ * Parses schema-constrained model output defensively.
+ *
+ * Strict json_schema is respected almost always, but models intermittently wrap the object in a
+ * Markdown code fence or prefix a short preamble. Observed live against a model that had returned
+ * clean JSON moments earlier, so this is normalized rather than treated as a provider failure.
+ */
+function parseModelJson(text, message) {
+  const trimmed = String(text ?? "").trim();
+  const candidates = [trimmed];
+  const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(trimmed);
+  if (fenced) candidates.push(fenced[1]);
+  const firstBrace = trimmed.indexOf("{");
+  const lastBrace = trimmed.lastIndexOf("}");
+  if (firstBrace > 0 && lastBrace > firstBrace) candidates.push(trimmed.slice(firstBrace, lastBrace + 1));
+  for (const candidate of candidates) {
+    try {
+      const value = JSON.parse(candidate);
+      if (value && typeof value === "object") return value;
+    } catch {
+      // Try the next normalization.
+    }
   }
+  throw new RequestError(502, "invalid_upstream_response", message);
+}
+
+function parseBoardExtraction(text) {
+  const value = parseModelJson(text, "Vision provider returned invalid JSON.");
   const keysMatch = value && typeof value === "object" && !Array.isArray(value) &&
     Object.keys(value).length === BOARD_REQUIRED_KEYS.length &&
     BOARD_REQUIRED_KEYS.every((key) => Object.hasOwn(value, key));
@@ -669,12 +759,7 @@ function validDiagramRegion(region) {
 }
 
 function parseNotePatch(text, request) {
-  let value;
-  try {
-    value = JSON.parse(text);
-  } catch {
-    throw new RequestError(502, "invalid_upstream_response", "Note provider returned invalid JSON.");
-  }
+  const value = parseModelJson(text, "Note provider returned invalid JSON.");
   const required = NOTE_PATCH_SCHEMA.required;
   const keysMatch = value && typeof value === "object" && !Array.isArray(value) &&
     Object.keys(value).length === required.length && required.every((key) => Object.hasOwn(value, key));
@@ -688,12 +773,7 @@ function parseNotePatch(text, request) {
 }
 
 function parseNoteDelta(text, request) {
-  let value;
-  try {
-    value = JSON.parse(text);
-  } catch {
-    throw new RequestError(502, "invalid_upstream_response", "Note provider returned invalid JSON.");
-  }
+  const value = parseModelJson(text, "Note provider returned invalid JSON.");
   const required = NOTE_DELTA_SCHEMA.required;
   const keysMatch = value && typeof value === "object" && !Array.isArray(value) &&
     Object.keys(value).length === required.length && required.every((key) => Object.hasOwn(value, key));
@@ -709,39 +789,36 @@ function parseNoteDelta(text, request) {
 }
 
 async function callBoardVision({ apiKey, imageBase64, mimeType, fetchImpl }) {
-  const upstream = await fetchImpl(RESPONSES_URL, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    signal: AbortSignal.timeout(45_000),
-    body: JSON.stringify({
-      model: VISION_MODEL,
-      store: false,
-      reasoning: { effort: "low" },
-      max_output_tokens: 2_000,
-      input: [{
-        role: "user",
-        content: [
-          {
-            type: "input_text",
-            text: [
-              "Read this classroom board, projector, or monitor frame as evidence.",
-              "Preserve legible wording and equations; do not invent obscured content.",
-              "Return tight normalized crop rectangles only for meaningful diagrams, graphs, or technical figures.",
-              "Exclude people, walls, bezels, glare, blank space, and unrelated background from each rectangle.",
-              "Mention uncertainty and likely OCR ambiguity in warnings.",
-            ].join(" "),
-          },
-          { type: "input_image", image_url: `data:${mimeType};base64,${imageBase64}`, detail: "high" },
-        ],
-      }],
-      text: { format: { type: "json_schema", name: "board_extraction", strict: true, schema: BOARD_SCHEMA } },
-    }),
+  const outputText = await callStructuredModel({
+    apiKey,
+    fetchImpl,
+    model: VISION_MODEL,
+    kind: "vision",
+    schema: BOARD_SCHEMA,
+    schemaName: "board_extraction",
+    maxTokens: 4_000,
+    timeoutMs: 45_000,
+    messages: [{
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: [
+            "Read this classroom board, projector, or monitor frame as evidence.",
+            "Preserve legible wording and equations; do not invent obscured content.",
+            // Measured failure mode: capital O in chemistry and physics notation is frequently
+            // returned as digit zero, turning 6O2 into 602.
+            "Distinguish the letter O from the digit 0 carefully in formulas, and prefer the reading",
+            "that makes the formula chemically or mathematically valid.",
+            "Return tight normalized crop rectangles only for meaningful diagrams, graphs, or technical figures.",
+            "Exclude people, walls, bezels, glare, blank space, prose lines, and unrelated background from each rectangle.",
+            "Mention uncertainty and likely OCR ambiguity in warnings.",
+          ].join(" "),
+        },
+        { type: "image_url", image_url: { url: `data:${mimeType};base64,${imageBase64}` } },
+      ],
+    }],
   });
-  if (!upstream.ok) {
-    throw await providerFailure("vision", upstream);
-  }
-  const outputText = extractOutputText(await upstream.json());
-  if (!outputText) throw new RequestError(502, "invalid_upstream_response", "Vision provider returned no text output.");
   return parseBoardExtraction(outputText);
 }
 
@@ -858,73 +935,118 @@ function noteInstructions(request) {
 
 async function callNoteProvider({ apiKey, request, fetchImpl }) {
   const delta = request.responseMode === "delta";
-  const schema = delta ? NOTE_DELTA_SCHEMA : NOTE_PATCH_SCHEMA;
-  const modelRequest = providerNoteRequest(request);
-  const upstream = await fetchImpl(RESPONSES_URL, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    signal: AbortSignal.timeout(55_000),
-    body: JSON.stringify({
-      model: NOTE_MODEL,
-      store: false,
-      reasoning: { effort: "low" },
-      max_output_tokens: delta ? 2_000 : 5_000,
-      input: [
-        { role: "developer", content: [{ type: "input_text", text: noteInstructions(request) }] },
-        { role: "user", content: [{ type: "input_text", text: JSON.stringify(modelRequest) }] },
-      ],
-      text: {
-        verbosity: "medium",
-        format: { type: "json_schema", name: delta ? "note_delta" : "note_patch", strict: true, schema },
-      },
-    }),
+  const outputText = await callStructuredModel({
+    apiKey,
+    fetchImpl,
+    model: NOTE_MODEL,
+    kind: "note",
+    schema: delta ? NOTE_DELTA_SCHEMA : NOTE_PATCH_SCHEMA,
+    schemaName: delta ? "note_delta" : "note_patch",
+    maxTokens: delta ? 3_000 : 6_000,
+    timeoutMs: 55_000,
+    messages: [
+      { role: "system", content: noteInstructions(request) },
+      { role: "user", content: JSON.stringify(providerNoteRequest(request)) },
+    ],
   });
-  if (!upstream.ok) {
-    throw await providerFailure("note", upstream);
-  }
-  const outputText = extractOutputText(await upstream.json());
-  if (!outputText) throw new RequestError(502, "invalid_upstream_response", "Note provider returned no text output.");
   return delta ? parseNoteDelta(outputText, request) : parseNotePatch(outputText, request);
 }
 
 function audioFilename(mimeType) {
-  return mimeType.includes("wav") ? "chunk.wav" : mimeType.includes("webm") ? "chunk.webm" : mimeType.includes("ogg") ? "chunk.ogg" : mimeType.includes("flac") ? "chunk.flac" : mimeType.includes("mp4") ? "chunk.m4a" : "chunk.mp3";
+  return mimeType.includes("wav") ? "wav" : mimeType.includes("webm") ? "webm" : mimeType.includes("ogg") ? "ogg" : mimeType.includes("flac") ? "flac" : mimeType.includes("mp4") ? "m4a" : "mp3";
 }
 
+/**
+ * Diarized transcript contract.
+ *
+ * OpenRouter's dedicated `/audio/transcriptions` endpoint returns no speaker labels, so diarization
+ * comes from an audio-capable model constrained by this schema instead. That is speaker
+ * *segmentation inferred from the audio*, not acoustic diarization with voice embeddings, which
+ * matches how this project already treats labels: chunk-local and never an identity claim.
+ */
+export const TRANSCRIPT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["text", "durationMs", "segments"],
+  properties: {
+    text: { type: "string" },
+    durationMs: { type: "integer" },
+    segments: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["speaker", "startMs", "endMs", "text"],
+        properties: {
+          speaker: { type: "string" },
+          startMs: { type: "integer" },
+          endMs: { type: "integer" },
+          text: { type: "string" },
+        },
+      },
+    },
+  },
+};
+
 async function callTranscriptionProvider({ apiKey, input, fetchImpl }) {
-  const form = new FormData();
-  form.append("file", new Blob([input.bytes], { type: input.mimeType }), audioFilename(input.mimeType));
-  form.append("model", TRANSCRIPTION_MODEL);
-  form.append("response_format", "diarized_json");
-  form.append("chunking_strategy", "auto");
-  if (input.language) form.append("language", input.language);
-  const upstream = await fetchImpl(TRANSCRIPTIONS_URL, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}` },
-    signal: AbortSignal.timeout(60_000),
-    body: form,
+  const outputText = await callStructuredModel({
+    apiKey,
+    fetchImpl,
+    model: TRANSCRIPTION_MODEL,
+    kind: "transcription",
+    schema: TRANSCRIPT_SCHEMA,
+    schemaName: "diarized_transcript",
+    maxTokens: 4_000,
+    timeoutMs: 60_000,
+    messages: [{
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: [
+            "Transcribe this classroom audio verbatim.",
+            "Split it into segments whenever the speaking voice changes.",
+            "Label each distinct voice with a stable letter within this clip only: A, B, C.",
+            "Labels are local to this clip and must not be treated as identities.",
+            "Give millisecond start and end offsets measured from the beginning of this clip,",
+            "and set durationMs to the clip length.",
+            "Do not invent speech that is not audible. Return an empty segment list for silence.",
+            input.language ? `The expected language is ${input.language}.` : "",
+          ].filter(Boolean).join(" "),
+        },
+        {
+          type: "input_audio",
+          input_audio: {
+            data: Buffer.from(input.bytes).toString("base64"),
+            format: audioFilename(input.mimeType),
+          },
+        },
+      ],
+    }],
   });
-  if (!upstream.ok) {
-    throw await providerFailure("transcription", upstream);
-  }
-  const payload = await upstream.json();
-  if (typeof payload?.text !== "string" || typeof payload?.duration !== "number" || !Array.isArray(payload?.segments)) {
+
+  const payload = parseModelJson(outputText, "Transcription model returned invalid JSON.");
+  if (typeof payload?.text !== "string" || !Array.isArray(payload?.segments)) {
     throw new RequestError(502, "invalid_upstream_response", "Transcription provider returned an unexpected shape.");
   }
   const segments = payload.segments.map((segment, index) => {
-    if (!segment || typeof segment !== "object" || typeof segment.text !== "string" || typeof segment.speaker !== "string" ||
-      typeof segment.start !== "number" || typeof segment.end !== "number" || segment.end < segment.start) {
+    if (!segment || typeof segment !== "object" || typeof segment.text !== "string" ||
+      typeof segment.speaker !== "string" || !Number.isFinite(segment.startMs) ||
+      !Number.isFinite(segment.endMs) || segment.endMs < segment.startMs) {
       throw new RequestError(502, "invalid_upstream_response", `Transcription segment ${index} is invalid.`);
     }
     return {
-      id: `${input.chunkId}:${typeof segment.id === "string" ? segment.id : index}`,
-      speakerId: segment.speaker,
-      startMs: input.offsetMs + Math.round(segment.start * 1_000),
-      endMs: input.offsetMs + Math.round(segment.end * 1_000),
+      id: `${input.chunkId}:${index}`,
+      speakerId: segment.speaker.trim().slice(0, 64) || "A",
+      startMs: input.offsetMs + Math.max(0, Math.round(segment.startMs)),
+      endMs: input.offsetMs + Math.max(0, Math.round(segment.endMs)),
       text: segment.text.trim(),
     };
   }).filter((segment) => segment.text.length > 0);
-  return { sessionId: input.sessionId, chunkId: input.chunkId, text: payload.text, durationMs: Math.round(payload.duration * 1_000), segments };
+  const durationMs = Number.isFinite(payload.durationMs) && payload.durationMs > 0
+    ? Math.round(payload.durationMs)
+    : segments.reduce((longest, segment) => Math.max(longest, segment.endMs - input.offsetMs), 0);
+  return { sessionId: input.sessionId, chunkId: input.chunkId, text: payload.text, durationMs, segments };
 }
 
 function mockTranscription(input) {
@@ -1100,15 +1222,15 @@ function callerKey(request) {
 }
 
 function apiKeyOrThrow(env) {
-  if (!env.OPENAI_API_KEY) {
+  if (!env.OPENROUTER_API_KEY) {
     throw new RequestError(
       503,
-      "openai_not_configured",
-      "Server-side OpenAI access is not configured.",
+      "provider_not_configured",
+      "Server-side OpenRouter access is not configured.",
       { retryable: false },
     );
   }
-  return env.OPENAI_API_KEY;
+  return env.OPENROUTER_API_KEY;
 }
 
 function createIdempotencyCache() {
@@ -1200,13 +1322,13 @@ export function createVoxBoxServer({ env = process.env, fetchImpl = globalThis.f
         const input = validateBoardInput(await readJson(request));
         if (mock) return sendJson(response, 200, MOCK_BOARD_RESULT);
         const result = await callBoardVision({ apiKey: apiKeyOrThrow(env), ...input, fetchImpl });
-        return sendJson(response, 200, { ...result, source: "openai" });
+        return sendJson(response, 200, { ...result, source: PROVIDER_SOURCE });
       }
       if (url.pathname === "/v1/audio/transcribe") {
         const input = validateAudioInput(await readJson(request));
         if (mock) return sendJson(response, 200, mockTranscription(input));
         const result = await callTranscriptionProvider({ apiKey: apiKeyOrThrow(env), input, fetchImpl });
-        return sendJson(response, 200, { ...result, source: "openai" });
+        return sendJson(response, 200, { ...result, source: PROVIDER_SOURCE });
       }
       if (url.pathname === "/v1/notes/refine") {
         const input = validateNoteInput(await readJson(request));
@@ -1216,7 +1338,7 @@ export function createVoxBoxServer({ env = process.env, fetchImpl = globalThis.f
         if (cached) return sendJson(response, 200, cached);
         const result = mock
           ? mockNotePatch(input)
-          : { ...(await callNoteProvider({ apiKey: apiKeyOrThrow(env), request: input, fetchImpl })), source: "openai" };
+          : { ...(await callNoteProvider({ apiKey: apiKeyOrThrow(env), request: input, fetchImpl })), source: PROVIDER_SOURCE };
         noteCache.set(cacheKey, fingerprint, result);
         return sendJson(response, 200, result);
       }

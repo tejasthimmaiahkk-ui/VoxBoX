@@ -1,7 +1,8 @@
 package me.thimmaiah.voxbox.audio
 
 enum class TranscriptionSource {
-    OPENAI,
+    /** A real provider answered through the VoxBox proxy. */
+    PROVIDER,
     MOCK,
 }
 

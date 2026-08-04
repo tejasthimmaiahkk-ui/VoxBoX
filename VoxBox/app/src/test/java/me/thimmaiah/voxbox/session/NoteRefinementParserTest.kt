@@ -32,7 +32,7 @@ class NoteRefinementParserTest {
 
         assertEquals(3, result.baseRevision)
         assertEquals(4, result.nextRevision)
-        assertEquals(NoteRefinementSource.OPENAI, result.source)
+        assertEquals(NoteRefinementSource.PROVIDER, result.source)
         assertEquals(NoteRefinementUpdateMode.FULL, result.updateMode)
         assertTrue(result.markdown.contains("Power rule"))
         assertEquals("warning", result.corrections.single().severity)

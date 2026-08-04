@@ -145,7 +145,8 @@ internal fun parseAudioTranscriptionResponse(
     }
     val source = when (root.requiredString("source")) {
         "mock" -> TranscriptionSource.MOCK
-        "openai" -> TranscriptionSource.OPENAI
+        // The proxy names the upstream it actually used; the app only needs mock vs real.
+        "openrouter", "openai" -> TranscriptionSource.PROVIDER
         else -> throw AudioTranscriptionException("The transcription response has an unknown source.")
     }
     val segments = (root["segments"] as? JsonArray)

@@ -20,7 +20,7 @@ class AudioTranscriptionParserTest {
         )
 
         assertEquals("s1", result.sessionId)
-        assertEquals(TranscriptionSource.OPENAI, result.source)
+        assertEquals(TranscriptionSource.PROVIDER, result.source)
         assertEquals("A", result.segments.single().speakerId)
         assertEquals(30_000, result.segments.single().startMs)
     }

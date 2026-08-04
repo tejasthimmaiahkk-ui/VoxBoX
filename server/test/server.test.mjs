@@ -131,7 +131,7 @@ test("health and all pipelines work deterministically in mock mode", async () =>
 test("invalid media and unknown fields are rejected before any provider call", async () => {
   let calls = 0;
   const base = await start({
-    env: { OPENAI_API_KEY: "test-only", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+    env: { OPENROUTER_API_KEY: "test-only", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
     fetchImpl: async () => {
       calls += 1;
       throw new Error("must not run");
@@ -165,10 +165,10 @@ test("live board mode sends the fixed vision model and validates diagram crops",
     warnings: [],
   };
   const base = await start({
-    env: { OPENAI_API_KEY: "test-only-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+    env: { OPENROUTER_API_KEY: "test-only-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
     fetchImpl: async (url, options) => {
       request = { url, options };
-      return new Response(JSON.stringify({ output_text: JSON.stringify(expected) }), {
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(expected) } }] }), {
         status: 200,
         headers: { "content-type": "application/json" },
       });
@@ -179,13 +179,14 @@ test("live board mode sends the fixed vision model and validates diagram crops",
     mimeType: "image/jpeg",
   });
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { ...expected, source: "openai" });
+  assert.deepEqual(await response.json(), { ...expected, source: "openrouter" });
   const body = JSON.parse(request.options.body);
-  assert.equal(request.url, "https://api.openai.com/v1/responses");
+  assert.equal(request.url, "https://openrouter.ai/api/v1/chat/completions");
   assert.equal(body.model, VISION_MODEL);
-  assert.equal(body.text.format.strict, true);
-  assert.equal(body.max_output_tokens, 2_000);
-  assert.match(body.input[0].content[1].image_url, /^data:image\/jpeg;base64,/);
+  assert.equal(body.response_format.json_schema.strict, true);
+  assert.equal(body.response_format.json_schema.name, "board_extraction");
+  assert.equal(body.max_tokens, 4_000);
+  assert.match(body.messages[0].content[1].image_url.url, /^data:image\/jpeg;base64,/);
   assert.equal(request.options.headers.Authorization, "Bearer test-only-secret");
 });
 
@@ -201,8 +202,8 @@ test("out-of-bounds diagram regions from the provider are rejected", async () =>
     warnings: [],
   };
   const base = await start({
-    env: { OPENAI_API_KEY: "test", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
-    fetchImpl: async () => new Response(JSON.stringify({ output_text: JSON.stringify(invalid) }), { status: 200 }),
+    env: { OPENROUTER_API_KEY: "test", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+    fetchImpl: async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(invalid) } }] }), { status: 200 }),
   });
   const response = await post(base, "/v1/board/extract", {
     imageBase64: jpeg.toString("base64"),
@@ -212,16 +213,22 @@ test("out-of-bounds diagram regions from the provider are rejected", async () =>
   assert.equal((await response.json()).error.code, "invalid_upstream_response");
 });
 
-test("live transcription uses multipart diarized transcription and applies the chunk offset", async () => {
+test("live transcription requests a diarized schema and applies the chunk offset", async () => {
   let request;
   const base = await start({
-    env: { OPENAI_API_KEY: "audio-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+    env: { OPENROUTER_API_KEY: "provider-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
     fetchImpl: async (url, options) => {
       request = { url, options };
       return new Response(JSON.stringify({
-        text: "Power rule.",
-        duration: 2.5,
-        segments: [{ id: "seg_1", speaker: "A", start: 0.25, end: 2.25, text: " Power rule. " }],
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              text: "Power rule.",
+              durationMs: 2_500,
+              segments: [{ speaker: "A", startMs: 250, endMs: 2_250, text: " Power rule. " }],
+            }),
+          },
+        }],
       }), { status: 200, headers: { "content-type": "application/json" } });
     },
   });
@@ -235,14 +242,22 @@ test("live transcription uses multipart diarized transcription and applies the c
   });
   assert.equal(response.status, 200);
   const result = await response.json();
+  // Model offsets are clip-relative; the proxy rebases them onto the session timeline.
   assert.equal(result.segments[0].startMs, 30_250);
   assert.equal(result.segments[0].endMs, 32_250);
-  assert.equal(result.source, "openai");
-  assert.equal(request.url, "https://api.openai.com/v1/audio/transcriptions");
-  assert.equal(request.options.body.get("model"), TRANSCRIPTION_MODEL);
-  assert.equal(request.options.body.get("response_format"), "diarized_json");
-  assert.equal(request.options.body.get("chunking_strategy"), "auto");
-  assert.equal(request.options.headers.Authorization, "Bearer audio-secret");
+  assert.equal(result.segments[0].speakerId, "A");
+  assert.equal(result.source, "openrouter");
+  assert.equal(request.url, "https://openrouter.ai/api/v1/chat/completions");
+
+  const sent = JSON.parse(request.options.body);
+  assert.equal(sent.model, TRANSCRIPTION_MODEL);
+  assert.equal(sent.response_format.json_schema.name, "diarized_transcript");
+  assert.equal(sent.response_format.json_schema.strict, true);
+  const parts = sent.messages[0].content;
+  assert.equal(parts.at(-1).type, "input_audio");
+  assert.equal(parts.at(-1).input_audio.format, "wav");
+  assert.ok(parts[0].text.includes("must not be treated as identities"));
+  assert.equal(request.options.headers.Authorization, "Bearer provider-secret");
 });
 
 test("live note refinement enforces request identity and caches idempotent replays", async () => {
@@ -261,24 +276,24 @@ test("live note refinement enforces request identity and caches idempotent repla
     warnings: [],
   };
   const base = await start({
-    env: { OPENAI_API_KEY: "note-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+    env: { OPENROUTER_API_KEY: "provider-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
     fetchImpl: async (_url, options) => {
       calls += 1;
       upstreamBody = JSON.parse(options.body);
-      return new Response(JSON.stringify({ output_text: JSON.stringify(expected) }), { status: 200 });
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(expected) } }] }), { status: 200 });
     },
   });
   const first = await post(base, "/v1/notes/refine", requestBody);
   const second = await post(base, "/v1/notes/refine", requestBody);
   assert.equal(first.status, 200);
   assert.equal(second.status, 200);
-  assert.deepEqual(await first.json(), { ...expected, source: "openai" });
-  assert.deepEqual(await second.json(), { ...expected, source: "openai" });
+  assert.deepEqual(await first.json(), { ...expected, source: "openrouter" });
+  assert.deepEqual(await second.json(), { ...expected, source: "openrouter" });
   assert.equal(calls, 1);
   assert.equal(upstreamBody.model, NOTE_MODEL);
-  assert.equal(upstreamBody.store, false);
-  assert.equal(upstreamBody.text.format.strict, true);
-  assert.match(upstreamBody.input[0].content[0].text, /Never silently correct/);
+  assert.equal(upstreamBody.model, NOTE_MODEL);
+  assert.equal(upstreamBody.response_format.json_schema.strict, true);
+  assert.match(upstreamBody.messages[0].content, /Never silently correct/);
 });
 
 test("note refinement rejects empty evidence and invalid revision relationships", async () => {
@@ -287,9 +302,8 @@ test("note refinement rejects empty evidence and invalid revision relationships"
   assert.equal(empty.status, 400);
 
   const live = await start({
-    env: { OPENAI_API_KEY: "test", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
-    fetchImpl: async () => new Response(JSON.stringify({
-      output_text: JSON.stringify({
+    env: { OPENROUTER_API_KEY: "test", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+    fetchImpl: async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({
         requestId: "request-1",
         sessionId: "session-1",
         baseRevision: 0,
@@ -299,8 +313,7 @@ test("note refinement rejects empty evidence and invalid revision relationships"
         corrections: [],
         consumedEvidenceIds: ["segment-1"],
         warnings: [],
-      }),
-    }), { status: 200 }),
+      }) } }] }), { status: 200 }),
   });
   const invalidRevision = await post(live, "/v1/notes/refine", noteRequest());
   assert.equal(invalidRevision.status, 502);
@@ -342,11 +355,11 @@ test("delta refinement uses bounded note context and selects relevant syllabus t
     warnings: [],
   };
   const base = await start({
-    env: { OPENAI_API_KEY: "note-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+    env: { OPENROUTER_API_KEY: "provider-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
     fetchImpl: async (_url, options) => {
       calls += 1;
       upstreamBody = JSON.parse(options.body);
-      return new Response(JSON.stringify({ output_text: JSON.stringify(expected) }), { status: 200 });
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(expected) } }] }), { status: 200 });
     },
   });
 
@@ -354,12 +367,12 @@ test("delta refinement uses bounded note context and selects relevant syllabus t
   const replay = await post(base, "/v1/notes/refine", requestBody);
   assert.equal(first.status, 200);
   assert.equal(replay.status, 200);
-  assert.deepEqual(await first.json(), { ...expected, source: "openai" });
-  assert.deepEqual(await replay.json(), { ...expected, source: "openai" });
+  assert.deepEqual(await first.json(), { ...expected, source: "openrouter" });
+  assert.deepEqual(await replay.json(), { ...expected, source: "openrouter" });
   assert.equal(calls, 1);
-  assert.equal(upstreamBody.max_output_tokens, 2_000);
-  assert.equal(upstreamBody.text.format.name, "note_delta");
-  const providerRequest = JSON.parse(upstreamBody.input[1].content[0].text);
+  assert.equal(upstreamBody.max_tokens, 3_000);
+  assert.equal(upstreamBody.response_format.json_schema.name, "note_delta");
+  const providerRequest = JSON.parse(upstreamBody.messages[1].content);
   assert.equal(providerRequest.existingMarkdown, "");
   assert.ok(providerRequest.syllabusContext.length <= 12_000);
   assert.match(providerRequest.syllabusContext, /derivative of x squared/i);
@@ -381,10 +394,10 @@ test("note idempotency rejects changed evidence instead of replaying a stale res
     warnings: [],
   };
   const base = await start({
-    env: { OPENAI_API_KEY: "note-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+    env: { OPENROUTER_API_KEY: "provider-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
     fetchImpl: async () => {
       calls += 1;
-      return new Response(JSON.stringify({ output_text: JSON.stringify(expected) }), { status: 200 });
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(expected) } }] }), { status: 200 });
     },
   });
   assert.equal((await post(base, "/v1/notes/refine", requestBody)).status, 200);
@@ -400,9 +413,8 @@ test("note idempotency rejects changed evidence instead of replaying a stale res
 test("note provider cannot cite evidence outside the request", async () => {
   const requestBody = noteRequest({ requestId: "bad-evidence" });
   const base = await start({
-    env: { OPENAI_API_KEY: "note-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
-    fetchImpl: async () => new Response(JSON.stringify({
-      output_text: JSON.stringify({
+    env: { OPENROUTER_API_KEY: "provider-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+    fetchImpl: async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({
         requestId: requestBody.requestId,
         sessionId: requestBody.sessionId,
         baseRevision: 0,
@@ -418,8 +430,7 @@ test("note provider cannot cite evidence outside the request", async () => {
         }],
         consumedEvidenceIds: ["segment-1"],
         warnings: [],
-      }),
-    }), { status: 200 }),
+      }) } }] }), { status: 200 }),
   });
   const response = await post(base, "/v1/notes/refine", requestBody);
   assert.equal(response.status, 502);
@@ -475,7 +486,7 @@ function providerError(status, body, headers = {}) {
 
 test("an exhausted provider quota is preserved as 429 and marked non-retryable", async () => {
   const base = await start({
-    env: { OPENAI_API_KEY: "audio-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+    env: { OPENROUTER_API_KEY: "provider-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
     fetchImpl: async () => providerError(
       429,
       { error: { message: "You exceeded your current quota.", type: "insufficient_quota", code: "insufficient_quota" } },
@@ -495,7 +506,7 @@ test("an exhausted provider quota is preserved as 429 and marked non-retryable",
 
 test("a transient rate limit stays retryable and reports its retry delay", async () => {
   const base = await start({
-    env: { OPENAI_API_KEY: "audio-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+    env: { OPENROUTER_API_KEY: "provider-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
     fetchImpl: async () => providerError(
       429,
       { error: { message: "Rate limit reached.", type: "rate_limit_error", code: "rate_limit_exceeded" } },
@@ -515,7 +526,7 @@ test("a transient rate limit stays retryable and reports its retry delay", async
 
 test("a rejected server credential is non-retryable and never echoes the key", async () => {
   const base = await start({
-    env: { OPENAI_API_KEY: "audio-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+    env: { OPENROUTER_API_KEY: "provider-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
     fetchImpl: async () => providerError(401, {
       error: { message: "Incorrect API key provided.", type: "invalid_request_error", code: "invalid_api_key" },
     }),
@@ -526,12 +537,12 @@ test("a rejected server credential is non-retryable and never echoes the key", a
   const body = await response.text();
   assert.equal(JSON.parse(body).error.code, "transcription_auth_error");
   assert.equal(JSON.parse(body).error.retryable, false);
-  assert.ok(!body.includes("audio-secret"));
+  assert.ok(!body.includes("provider-secret"));
 });
 
 test("vision and note provider failures use the same classification", async () => {
   const visionBase = await start({
-    env: { OPENAI_API_KEY: "vision-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+    env: { OPENROUTER_API_KEY: "provider-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
     fetchImpl: async () => providerError(429, {
       error: { message: "quota", type: "insufficient_quota", code: "insufficient_quota" },
     }),
@@ -544,7 +555,7 @@ test("vision and note provider failures use the same classification", async () =
   assert.equal((await vision.json()).error.code, "vision_quota_exhausted");
 
   const noteBase = await start({
-    env: { OPENAI_API_KEY: "note-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+    env: { OPENROUTER_API_KEY: "provider-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
     fetchImpl: async () => providerError(500, { error: { message: "server error", type: "server_error" } }),
   });
   const note = await post(noteBase, "/v1/notes/refine", noteRequest({ requestId: "provider-500" }));
@@ -556,7 +567,7 @@ test("vision and note provider failures use the same classification", async () =
 
 test("a non-JSON provider error body still classifies without leaking its contents", async () => {
   const base = await start({
-    env: { OPENAI_API_KEY: "audio-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+    env: { OPENROUTER_API_KEY: "provider-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
     fetchImpl: async () => new Response("<html>Gateway timeout</html>", {
       status: 504,
       headers: { "content-type": "text/html" },
@@ -574,7 +585,7 @@ test("a non-JSON provider error body still classifies without leaking its conten
 });
 
 test("a live server refuses to forward anything without a configured client token", async () => {
-  const base = await start({ env: { OPENAI_API_KEY: "audio-secret" } });
+  const base = await start({ env: { OPENROUTER_API_KEY: "provider-secret" } });
 
   const response = await post(base, "/v1/audio/transcribe", audioRequest());
   assert.equal(response.status, 503);
@@ -635,14 +646,20 @@ test("a burst beyond the rate limit is rejected with a retry delay", async () =>
 test("the daily budget caps billable calls and never counts mock calls", async () => {
   const live = await start({
     env: {
-      OPENAI_API_KEY: "audio-secret",
+      OPENROUTER_API_KEY: "provider-secret",
       VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN,
       VOXBOX_DAILY_REQUEST_BUDGET: "2",
     },
     fetchImpl: async () => new Response(JSON.stringify({
-      text: "ok",
-      duration: 1,
-      segments: [{ id: "seg_1", speaker: "A", start: 0, end: 1, text: "ok" }],
+      choices: [{
+        message: {
+          content: JSON.stringify({
+            text: "ok",
+            durationMs: 1_000,
+            segments: [{ speaker: "A", startMs: 0, endMs: 1_000, text: "ok" }],
+          }),
+        },
+      }],
     }), { status: 200, headers: { "content-type": "application/json" } }),
   });
 
@@ -663,4 +680,39 @@ test("the daily budget caps billable calls and never counts mock calls", async (
   }
   const health = await fetch(`${mock}/health`).then((response) => response.json());
   assert.equal(health.budget.used, 0);
+});
+
+test("model output wrapped in a Markdown fence or preamble is still accepted", async () => {
+  const transcript = {
+    text: "Power rule.",
+    durationMs: 2_000,
+    segments: [{ speaker: "A", startMs: 0, endMs: 2_000, text: "Power rule." }],
+  };
+  // Observed live: a model that returns clean JSON can intermittently fence it.
+  for (const wrap of [
+    (json) => "```json\n" + json + "\n```",
+    (json) => "```\n" + json + "\n```",
+    (json) => "Here is the transcript:\n" + json,
+  ]) {
+    const base = await start({
+      env: { OPENROUTER_API_KEY: "provider-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+      fetchImpl: async () => new Response(JSON.stringify({
+        choices: [{ message: { content: wrap(JSON.stringify(transcript)) } }],
+      }), { status: 200, headers: { "content-type": "application/json" } }),
+    });
+    const response = await post(base, "/v1/audio/transcribe", audioRequest());
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).segments[0].text, "Power rule.");
+  }
+
+  // Genuinely unparseable output must still be reported as a provider failure.
+  const broken = await start({
+    env: { OPENROUTER_API_KEY: "provider-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+    fetchImpl: async () => new Response(JSON.stringify({
+      choices: [{ message: { content: "I could not hear any audio." } }],
+    }), { status: 200, headers: { "content-type": "application/json" } }),
+  });
+  const failed = await post(broken, "/v1/audio/transcribe", audioRequest());
+  assert.equal(failed.status, 502);
+  assert.equal((await failed.json()).error.code, "invalid_upstream_response");
 });

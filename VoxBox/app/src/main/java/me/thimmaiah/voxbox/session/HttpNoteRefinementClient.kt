@@ -242,7 +242,8 @@ internal fun parseNoteRefinementResponse(
         )
     }
     val source = when (root.requiredString("source")) {
-        "openai" -> NoteRefinementSource.OPENAI
+        // The proxy names the upstream it actually used; the app only needs mock vs real.
+        "openrouter", "openai" -> NoteRefinementSource.PROVIDER
         "mock" -> NoteRefinementSource.MOCK
         else -> throw NoteRefinementException("The note response has an unknown source.")
     }

@@ -1,8 +1,8 @@
 # VoxBox live-notes proxy
 
-This dependency-free Node.js 20+ service is the server boundary for VoxBox board extraction, diarized audio transcription, and incremental Markdown note refinement. It keeps the OpenAI project key out of the Android APK.
+This dependency-free Node.js 20+ service is the server boundary for VoxBox board extraction, diarized audio transcription, and incremental Markdown note refinement. It keeps the AI provider key out of the Android APK.
 
-> **Credential warning:** the project key previously pasted in chat is exposed and must be revoked. Configure only a rotated replacement in the server process. Never put a real key in this directory, source control, Gradle, Android resources, or the APK. The automated tests use fake transports and make no billable requests.
+> **Credential warning:** never put a real provider key in this directory, source control, Gradle, Android resources, or the APK. It belongs in the server process environment or the host's secret store only. The automated tests use fake transports and make no billable requests.
 
 The proxy is intentionally small and ephemeral. It does not create server-side note sessions or persist notes, audio, images, or syllabus content. `sessionId` values correlate client requests. The only retained application data is a bounded in-memory note-refinement replay cache: up to 128 responses for approximately 10 minutes, keyed by `sessionId` and `requestId`.
 
@@ -16,33 +16,34 @@ $env:MOCK_AI="1"
 npm start
 ```
 
-`MOCK_AI=1` applies to all three pipelines and makes no OpenAI calls. The older `MOCK_VISION=1` variable remains a compatibility alias and currently also enables mock mode for every pipeline.
+`MOCK_AI=1` applies to all three pipelines and makes no provider calls. The older `MOCK_VISION=1` variable remains a compatibility alias and currently also enables mock mode for every pipeline.
 
 - Board mock output does not inspect the image.
 - Audio mock output does not transcribe the audio; it returns one fixed speaker-labelled segment after validating the media.
 - Note mock output deterministically formats the supplied evidence and is not an AI accuracy result.
 - Every mock response includes `"source": "mock"`.
 
-## Run with OpenAI
+## Run with OpenRouter
 
-After revoking the exposed credential, set the rotated key only in the process environment:
+Set the provider key and the client token only in the process environment:
 
 ```powershell
-$env:OPENAI_API_KEY="<rotated-key>"
+$env:OPENROUTER_API_KEY="<server-side-key>"
+$env:VOXBOX_CLIENT_TOKEN="<long-random-token>"
 Remove-Item Env:MOCK_AI -ErrorAction SilentlyContinue
 Remove-Item Env:MOCK_VISION -ErrorAction SilentlyContinue
 npm start
 ```
 
-`.env.example` is a template; this server does not automatically load it. If mock mode is disabled and no key is configured, provider-backed requests return HTTP `503` with error code `openai_not_configured`.
+`.env.example` is a template; this server does not automatically load it. If mock mode is disabled and no key is configured, provider-backed requests return HTTP `503` with error code `provider_not_configured`.
 
 The implemented model routing is fixed in `server.mjs`:
 
 | Pipeline | Model | Provider API |
 | --- | --- | --- |
-| Board/projector frame | `gpt-5.6-sol` | Responses API, high-detail image, strict JSON Schema, `store: false` |
-| Markdown note refinement | `gpt-5.6-terra` | Responses API, low reasoning, strict JSON Schema, `store: false` |
-| Audio transcription | `gpt-4o-transcribe-diarize` | Audio Transcriptions API, `diarized_json`, automatic chunking |
+| Board/projector frame | `google/gemini-2.5-flash-lite` | Chat Completions, image_url, strict JSON Schema |
+| Markdown note refinement | `openai/gpt-oss-120b` | Chat Completions, strict JSON Schema |
+| Audio transcription | `google/gemini-3.1-flash-lite` | Chat Completions, `input_audio`, strict diarized JSON Schema |
 
 ## Security boundary
 
@@ -52,7 +53,7 @@ The server binds to `127.0.0.1:8787` by default. For a USB-connected Android deb
 adb reverse tcp:8787 tcp:8787
 ```
 
-This cleartext loopback route is for development only. Do not widen `HOST` to a LAN or public interface as-is: this service has no end-user authentication, rate limiting, or TLS termination. A release app must call an authenticated HTTPS backend or gateway, and only that server may hold the rotated provider credential.
+This cleartext loopback route is for development only. A hosted deployment must terminate TLS at the platform, set `VOXBOX_CLIENT_TOKEN`, and keep the provider key in the host's secret store. The proxy now authenticates callers and bounds its own spend, but it still relies on the host for TLS.
 
 The Android debug build uses `http://127.0.0.1:8787` through `BuildConfig.VOXBOX_API_BASE_URL`, so the `adb reverse` workflow above remains unchanged. Release builds have no localhost fallback and fail validation unless an HTTPS base URL is supplied:
 
@@ -63,7 +64,7 @@ cd "D:\College Project\VoxBox"
 
 The `VOXBOX_API_BASE_URL` environment variable is also accepted. Release validation rejects a missing value, cleartext HTTP, credentials, query strings, and fragments; the clients repeat the HTTPS/configuration check before opening a connection.
 
-Requests and responses use `Cache-Control: no-store`. Submitted media and text are decoded or forwarded in memory and are not written to disk by this proxy. Live provider mode still sends the selected data to OpenAI; provider-side processing is governed by the configured account and provider policies. `store: false` applies to the Responses API calls and should not be described as a universal zero-retention guarantee.
+Requests and responses use `Cache-Control: no-store`. Submitted media and text are decoded or forwarded in memory and are not written to disk by this proxy. Live provider mode still sends the selected data to OpenRouter, which forwards it to the upstream that serves the chosen model; provider-side processing is governed by the configured account and those providers' policies. This proxy makes no zero-retention guarantee about them.
 
 ## Common HTTP contract
 
@@ -105,9 +106,9 @@ Response:
   "status": "ok",
   "mode": "mock",
   "models": {
-    "vision": "gpt-5.6-sol",
-    "notes": "gpt-5.6-terra",
-    "transcription": "gpt-4o-transcribe-diarize"
+    "vision": "google/gemini-2.5-flash-lite",
+    "notes": "openai/gpt-oss-120b",
+    "transcription": "google/gemini-3.1-flash-lite"
   },
   "retention": "in-memory-forwarding-only"
 }
@@ -148,7 +149,7 @@ Response:
   ],
   "confidence": 0.95,
   "warnings": [],
-  "source": "openai"
+  "source": "openrouter"
 }
 ```
 
@@ -190,7 +191,7 @@ Response:
       "text": "The power rule gives two x."
     }
   ],
-  "source": "openai"
+  "source": "openrouter"
 }
 ```
 
@@ -274,7 +275,7 @@ Response:
   ],
   "consumedEvidenceIds": ["chunk-0007:seg_1", "frame-18"],
   "warnings": [],
-  "source": "openai"
+  "source": "openrouter"
 }
 ```
 
@@ -312,7 +313,7 @@ For long-running sessions, set `responseMode` to `delta`, send an empty `existin
   "corrections": [],
   "consumedEvidenceIds": ["chunk-0008:seg_1"],
   "warnings": [],
-  "source": "openai"
+  "source": "openrouter"
 }
 ```
 
@@ -326,4 +327,45 @@ Replay safety is content-aware: the cache fingerprints the normalized request. R
 npm test
 ```
 
-The 11 tests cover mock behavior across all pipelines, request validation before provider calls, image signatures and crop bounds, multipart diarized transcription with chunk offsets, strict note response identity/revisions, bounded delta context, relevance-selected syllabus forwarding, evidence provenance, and content-aware idempotency. All provider transports are mocked, so the suite makes no real or billable OpenAI requests.
+The 22 tests cover mock behavior across all pipelines, request validation before provider calls, image signatures and crop bounds, diarized transcription with chunk offsets, strict note response identity/revisions, bounded delta context, relevance-selected syllabus forwarding, evidence provenance, content-aware idempotency, provider-failure classification, client-token authentication, the rate limit and daily budget, and fenced or prefixed model output. All provider transports are mocked, so the suite makes no real or billable requests.
+
+
+## Provider routing
+
+All three pipelines call OpenRouter's OpenAI-compatible `POST /api/v1/chat/completions` with a
+`strict` `json_schema` response format. OpenRouter is not used through its dedicated
+`/api/v1/audio/transcriptions` endpoint, because that endpoint returns no speaker labels and this
+project's speaker-focus feature depends on per-segment speakers.
+
+Diarization therefore comes from an audio-capable model constrained by the diarized transcript
+schema. That is **speaker segmentation inferred from the audio, not acoustic diarization with voice
+embeddings**. It matches how this project already treats labels: local to one chunk and never an
+identity claim. Accuracy on real classroom audio is unmeasured.
+
+Every request sets `provider: { require_parameters: true }`. OpenRouter load-balances a single model
+id across several upstream providers, and without this a request can land on one that ignores
+`response_format` and aborts mid-generation. That was observed live as `finish_reason: "error"` with
+a half-written JSON object, and the pin removed it.
+
+Abnormal completions are reported distinctly rather than as malformed JSON:
+
+| Condition | `code` | Proxy status | `retryable` |
+| --- | --- | --- | --- |
+| `finish_reason: length` or native `MAX_TOKENS` | `upstream_output_truncated` | `502` | `true` |
+| any other non-`stop` finish reason | `upstream_generation_failed` | `502` | `true` |
+| unparseable body after fence/preamble normalization | `invalid_upstream_response` | `502` | `true` |
+
+Model output is normalized before parsing: a Markdown code fence or a short preamble around the JSON
+object is stripped, because models that honour `strict` almost always still occasionally add one.
+
+## Environment variables
+
+| Variable | Purpose |
+| --- | --- |
+| `OPENROUTER_API_KEY` | Provider credential. Required in live mode. Never ships in the APK. |
+| `VOXBOX_CLIENT_TOKEN` | Shared bearer token the app presents. Required in live mode. |
+| `VOXBOX_RATE_LIMIT_MAX` / `VOXBOX_RATE_LIMIT_WINDOW_MS` | Per-caller fixed window. Defaults 60 per 60 s. |
+| `VOXBOX_DAILY_REQUEST_BUDGET` | Hard ceiling on billable calls per UTC day. Default 1500. |
+| `VOXBOX_TRANSCRIPTION_MODEL` / `VOXBOX_VISION_MODEL` / `VOXBOX_NOTE_MODEL` | Model overrides. |
+| `MOCK_AI` | Deterministic responses, no provider call, no budget consumption. |
+| `HOST` / `PORT` | Bind address. Use `0.0.0.0` and the platform port when hosted. |

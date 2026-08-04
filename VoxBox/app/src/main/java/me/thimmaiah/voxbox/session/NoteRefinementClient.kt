@@ -54,7 +54,8 @@ data class NoteRefinementRequest(
 )
 
 enum class NoteRefinementSource {
-    OPENAI,
+    /** A real provider answered through the VoxBox proxy. */
+    PROVIDER,
     MOCK,
 }
 

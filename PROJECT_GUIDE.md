@@ -32,7 +32,8 @@ Every report, deck and viva answer must distinguish these levels:
 1. **Verified legacy baseline:** the earlier bounded `SpeechRecognizer`, VoxScript, Room note/block, search and manual Board-still flows passed their documented automated and physical-device checks.
 2. **Implemented continuous MVP:** the new `AudioRecord`, periodic CameraX frame, frame-difference, diarized-transcription contract, speaker-focus, incremental Markdown, folder/syllabus, crop/retention and export paths exist in the shared tree. Android JVM tests and backend mock/fake contract tests pass; Kotlin production compilation passes.
 3. **Runtime-verified mock slice:** two opt-in instrumentation tests passed independently on Android 16 against the deterministic loopback proxy. They establish the exact Voice final-partial and Video camera-plus-audio pipelines described below, not model or capture accuracy. Both were re-run on 2026-08-04 against the redesigned UI and passed (Voice 11.136 s, Video 32.339 s).
-4. **Not yet evaluated:** no real rotated-key OpenAI run, noisy-room/speaker corpus, endurance/resource evaluation, diagram-crop corpus or YouTube lecture trial has passed. No claim may upgrade these items until evidence is recorded.
+4. **Live-provider contract verified:** on 2026-08-04 all three pipelines completed against the real OpenRouter API through the proxy, using synthetic inputs with known ground truth. This establishes that the request/response contracts work end to end with a real model. It is **not** an accuracy result.
+5. **Not yet evaluated:** no noisy-room/speaker corpus, endurance/resource evaluation, diagram-crop corpus or YouTube lecture trial has passed, and nothing has been measured on real classroom material. No claim may upgrade these items until evidence is recorded.
 
 The 2026-08-04 increment also found that board evidence had never reached the note provider: the note-refinement request builder overwrote it with `null` before sending. That is fixed, covered by request-contract tests, and confirmed on device in mock mode — the Video note now reaches `## Board evidence` sections, which the proxy emits only when the request actually carries a `boardEvidence` object. It is still unconfirmed against a real provider.
 
@@ -155,17 +156,25 @@ Export cache items older than 24 hours are removed on a later export. Folder-wid
 
 ## Secure proxy and model routing
 
-The Android APK never contains an OpenAI key. Debug builds use `http://127.0.0.1:8787` through `adb reverse`. Release builds must receive `VOXBOX_API_BASE_URL` as a Gradle property or environment variable; the pre-release build rejects a missing/non-HTTPS URL, credentials, query or fragment. Runtime URL validation also forbids embedded credentials and requires HTTPS outside debug. The proxy validates input sizes/signatures and exposes:
+The Android APK never contains a provider key. Debug builds use `http://127.0.0.1:8787` through `adb reverse`. Release builds must receive `VOXBOX_API_BASE_URL` and `VOXBOX_CLIENT_TOKEN` as Gradle properties or environment variables; the pre-release build rejects a missing/non-HTTPS URL, credentials, query or fragment, and a missing, short or whitespace-bearing token. Runtime URL validation also forbids embedded credentials and requires HTTPS outside debug.
 
-- `gpt-4o-transcribe-diarize` for diarized audio transcription;
-- `gpt-5.6-sol` for image/board extraction; and
-- `gpt-5.6-terra` for incremental note synthesis.
+The provider is **OpenRouter**, reached through its OpenAI-compatible `POST /api/v1/chat/completions` with a `strict` `json_schema` response format on all three pipelines. Defaults, each chosen by measuring candidates against this project's own contracts rather than by list price:
 
-Responses use strict full/delta contracts, provider storage is disabled where supported, and the proxy forwards media in memory rather than writing it to disk. The delta contract binds output to the current content hash; the legacy full contract remains the default for older clients. Note-refinement responses have a small in-memory idempotency cache. Mock mode is deterministic and is integration evidence only.
+- `google/gemini-3.1-flash-lite` for diarized audio transcription;
+- `google/gemini-2.5-flash-lite` for image/board extraction; and
+- `openai/gpt-oss-120b` for incremental note synthesis.
 
-Provider failures are classified rather than collapsed into one gateway error. The proxy reads a bounded provider error body plus the response headers and preserves upstream `429`: `insufficient_quota` becomes `<kind>_quota_exhausted` with `retryable: false`, any other `429` becomes `<kind>_rate_limited` with `retryable: true`, `401`/`403` become a non-retryable `<kind>_auth_error`, other `4xx` become a non-retryable `<kind>_request_rejected`, and `5xx` or unreadable bodies stay a retryable `<kind>_provider_error`. Each error carries `retryable`, and classified failures carry the upstream status, `type`, `code`, truncated message, `x-request-id`, retry-after seconds and remaining rate-limit counters. The proxy logs only that classification; it never logs request bodies, media or the configured key. Android parses the same envelope, skips retries that cannot succeed, and shows the matching remedy in the live UI.
+Each is overridable by environment variable. Measured cost is roughly **$0.18 per lecture-hour** across all three pipelines.
 
-The pasted project credential is exposed and must be revoked. A replacement belongs only in the proxy process environment. The loopback proxy has no end-user authentication or TLS; a production release requires an authenticated HTTPS backend, rate limits, monitoring and access control.
+OpenRouter's dedicated transcription endpoint returns no speaker labels, so diarization comes from an audio-capable model constrained by a diarized transcript schema. That is **speaker segmentation inferred from the audio, not acoustic diarization with voice embeddings**. It suits how this project already treats labels — local to one chunk, never an identity claim — but its accuracy on real classroom audio is unmeasured.
+
+Every request pins `provider: { require_parameters: true }`. OpenRouter load-balances one model id across several upstreams, and without the pin a request can land on one that ignores `response_format` and aborts mid-generation; that was observed live as `finish_reason: "error"` with half-written JSON. Abnormal completions now report `upstream_output_truncated` or `upstream_generation_failed` rather than surfacing as malformed JSON, and model output is normalized for a Markdown fence or short preamble before parsing.
+
+Pipeline routes require `Authorization: Bearer <VOXBOX_CLIENT_TOKEN>`, compared in constant time. In live mode the server refuses to forward anything without that token configured, so a deployment can never be an open relay. `/health` stays unauthenticated for platform health checks. A per-caller rate limit and a hard daily budget of billable calls bound the damage from a leaked token; both are in-memory and per instance. The token is compiled into the APK and is therefore extractable — it deters casual abuse, and the daily budget is the real protection.
+
+Responses use strict full/delta contracts, and the proxy forwards media in memory rather than writing it to disk. The delta contract binds output to the current content hash; the legacy full contract remains the default for older clients. Note-refinement responses have a small in-memory idempotency cache. Mock mode is deterministic, consumes no budget, and is integration evidence only.
+
+Provider failures are classified rather than collapsed into one gateway error. Upstream `429` is preserved: `insufficient_quota` becomes `<kind>_quota_exhausted` with `retryable: false`, any other `429` becomes `<kind>_rate_limited` with `retryable: true`, `401`/`403` become a non-retryable `<kind>_auth_error`, other `4xx` a non-retryable `<kind>_request_rejected`, and `5xx` or unreadable bodies a retryable `<kind>_provider_error`. Each error carries `retryable` plus upstream status, type, code, request id, retry-after and rate-limit counters. The proxy logs only that classification; never request bodies, media or credentials. Android parses the same envelope, skips retries that cannot succeed, and shows the matching remedy.
 
 ## Privacy and ethical baseline
 
@@ -250,6 +259,28 @@ No percentage is reported until a versioned corpus, protocol and scorer exist.
 - Two recovery WAVs created by intentionally aborted diagnostic sessions were matched to their exact `Device smoke` session ids and deleted. No unrecovered-audio file remained after cleanup.
 
 This proves deterministic mock plumbing for those two scenarios. It does not measure transcription, diarization, note, OCR, equation or diagram accuracy, and it does not establish long-session reliability.
+
+### 2026-08-04 live-provider verification
+
+All three pipelines were exercised against the real OpenRouter API through the proxy, with synthetic
+inputs whose correct answer was known in advance:
+
+- **Transcription** — a 16.7 s two-voice clip synthesized with two distinct TTS voices. Returned the
+  correct A/B speaker split, an accurate transcript, and `durationMs` 16,420 against a true 16,700 ms.
+  Session offsets were correctly rebased onto the session timeline.
+- **Board vision** — a synthetic whiteboard with a known equation and a known diagram rectangle.
+  Returned the equation `6CO2 + 6H2O --light--> C6H12O6 + 6O2` exactly, and a diagram crop of
+  `{0.096, 0.472, 0.284, 0.318}` against a true `{0.09, 0.47, 0.30, 0.29}`.
+- **Note refinement** — transcript containing a planted factual error plus contradicting board
+  evidence. Returned a valid append-only delta, echoed the content hash correctly, preserved the
+  captured claim in the note body, and raised the contradiction as a separate correction.
+
+Two defects were found only by this live run and are fixed: OpenRouter routing to an upstream that
+ignored `response_format` and aborted mid-generation (now pinned with `require_parameters`), and
+abnormal completions surfacing as "invalid JSON" instead of a truncation or generation failure.
+
+This is contract evidence with synthetic inputs. It measures neither transcription, diarization,
+note, OCR, equation nor diagram accuracy on real classroom material.
 
 ### 2026-08-04 increment
 

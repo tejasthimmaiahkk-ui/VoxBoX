@@ -3,10 +3,14 @@ info:
   title: VoxBox Live Notes Proxy API
   version: 1.1.0
   description: |
-    Ephemeral development proxy for board extraction, diarized audio transcription,
-    and incremental Markdown note refinement. All pipeline bodies are JSON and are
-    limited to 14 MiB. The proxy has no end-user authentication or TLS and must
-    remain loopback-only unless placed behind an authenticated HTTPS gateway.
+    Proxy for board extraction, diarized audio transcription, and incremental
+    Markdown note refinement, backed by OpenRouter. All pipeline bodies are JSON and
+    are limited to 14 MiB.
+
+    Pipeline routes require `Authorization: Bearer <VOXBOX_CLIENT_TOKEN>`. In live
+    mode the server refuses to forward anything unless that token is configured, so a
+    deployment is never an open relay. `GET /health` stays unauthenticated so platform
+    health checks and uptime pingers can reach it. TLS is terminated by the host.
 servers:
   - url: http://127.0.0.1:8787
     description: Local debug server, commonly reached from Android through adb reverse
@@ -163,7 +167,7 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
     ProviderNotConfigured:
-      description: Mock mode is off and OPENAI_API_KEY is absent
+      description: Mock mode is off and OPENROUTER_API_KEY or VOXBOX_CLIENT_TOKEN is absent
       content:
         application/json:
           schema:
@@ -177,11 +181,11 @@ components:
   schemas:
     Source:
       type: string
-      enum: [mock, openai]
+      enum: [mock, openrouter]
     HealthResponse:
       type: object
       additionalProperties: false
-      required: [status, mode, models, retention]
+      required: [status, mode, models, retention, budget]
       properties:
         status:
           type: string
@@ -196,16 +200,25 @@ components:
           properties:
             vision:
               type: string
-              const: gpt-5.6-sol
+              description: Configured model id. Default google/gemini-2.5-flash-lite; overridable by environment variable.
             notes:
               type: string
-              const: gpt-5.6-terra
+              description: Configured model id. Default openai/gpt-oss-120b; overridable by environment variable.
             transcription:
               type: string
-              const: gpt-4o-transcribe-diarize
+              description: Configured model id. Default google/gemini-3.1-flash-lite; overridable by environment variable.
         retention:
           type: string
           const: in-memory-forwarding-only
+        budget:
+          type: object
+          additionalProperties: false
+          description: Daily billable-request ceiling and how much of it is used.
+          required: [day, used, limit]
+          properties:
+            day: { type: string }
+            used: { type: integer }
+            limit: { type: integer }
     BoardRequest:
       type: object
       additionalProperties: false
