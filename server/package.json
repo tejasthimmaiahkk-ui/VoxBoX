@@ -1,0 +1,14 @@
+{
+  "name": "voxbox-live-notes-proxy",
+  "version": "1.1.0",
+  "description": "Ephemeral development proxy for VoxBox board extraction, diarized transcription, and structured Markdown note refinement.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

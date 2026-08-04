@@ -219,3 +219,292 @@ This file is append-only. New entries go at the end. Existing entries may be cor
 - This accepted milestone proves read-only recovery/rendering of the currently implemented types. Editing, deletion, reordering, search and organization remain unimplemented.
 - No new review-slide claim is needed for the historical Review-1 deck; the current report, test plan and viva notes carry the new verified evidence for a later review.
 - The milestone has passed both required verification modes and is ready for one focused commit.
+
+## 2026-07-23 narrow typed editing implemented
+
+### Implemented
+
+- Added a typed editor for reopened paragraph, heading, bullet-point and pie-chart blocks.
+- Text edits trim surrounding whitespace and reject blank content. Pie-chart edits require a whole-number percentage from 0 to 100, one supported named color, and a non-blank label.
+- Room now performs a transactional, note-scoped block-field update and refreshes the parent note timestamp only when the target row exists. The block identity, type and ordered position are preserved.
+- Added three focused unit tests for text normalization, valid typed pie-slot updates and unsupported-color rejection.
+
+### Verification pass 1 — automated
+
+- Command: `gradlew.bat testDebugUnitTest assembleDebug lintDebug --console=plain`.
+- Result: **BUILD SUCCESSFUL**. The final suite contains 16 passing unit tests and a freshly assembled debug APK.
+- Lint completed with 0 errors and 20 warnings. The warnings are existing target/dependency availability notices and unused starter resources; no new edit-path lint error was reported.
+
+### Verification pass 2 — physical device
+
+- **Blocked, not passed.** The previously used `2411DRN47I` was unavailable. Android SDK platform-tools `adb.exe` started its server, but `adb devices -l` reported `no devices/emulators found` on 2026-07-23.
+- Installation, save/edit, force-stop/relaunch and reopened-block UI capture could not be performed. The required exact device flow is recorded in `evidence/edit-milestone/README.md` and remains pending until the device is reconnected and authorized.
+
+### Scope status
+
+- This milestone does not add deletion, reordering, search, organization, remaining VoxScript intents, diagrams or AI. Those items remain planned.
+
+## 2026-07-24 narrow typed editing reverified; device pass still blocked
+
+### Verification pass 1 — automated regression
+
+- Command: `gradlew.bat testDebugUnitTest assembleDebug lintDebug --console=plain`.
+- Result: **BUILD SUCCESSFUL**. All 16 unit tests passed: 1 starter test, 2 saved-block display tests, 3 typed-edit tests, 4 mapping tests and 6 VoxScript parser tests. A fresh debug APK and lint report were produced; lint has 0 errors.
+- Independent source-control check: `git diff --check` passed with exit code 0.
+
+### Verification pass 2 — physical-device availability
+
+- Command: `C:\Users\tejas\AppData\Local\Android\Sdk\platform-tools\adb.exe devices -l`.
+- Result: **blocked, not passed**. The command again returned `List of devices attached` with no device or emulator on 2026-07-24. The required save → edit → force-stop → relaunch → reopen verification cannot run.
+
+### Source-control status
+
+- No commit was created. The focused edit milestone must remain uncommitted until the physical-device pass completes; no later feature was started in order to keep the worktree scoped and avoid masking the missing verification.
+
+## 2026-07-26 narrow typed editing reverified; device pass still blocked
+
+### Verification pass 1 — automated regression
+
+- Command: `gradlew.bat testDebugUnitTest assembleDebug lintDebug --console=plain`.
+- Result: **BUILD SUCCESSFUL** (33s). Unit tests, fresh debug APK assembly and Android lint completed successfully; the existing 16-test suite remains green and lint reported no errors.
+- Independent source-control check: `git diff --check` passed with exit code 0.
+
+### Verification pass 2 — physical-device availability
+
+- Command: `C:\Users\tejas\AppData\Local\Android\Sdk\platform-tools\adb.exe devices -l`.
+- Result: **blocked, not passed**. On 2026-07-26 the command returned `List of devices attached` with no connected or authorized device/emulator. The required local save → edit → force-stop → relaunch → reopen capture cannot run.
+
+### Source-control status
+
+- No code was changed and no commit was created. The scoped typed-edit milestone remains uncommitted until its physical-device evidence is captured; AI remains optional and no provider or credential was added.
+
+## 2026-07-27 narrow typed editing reverified; device pass still blocked
+
+### Verification pass 1 — forced automated regression
+
+- Command: `gradlew.bat testDebugUnitTest assembleDebug lintDebug --rerun-tasks --console=plain`.
+- Result: **BUILD SUCCESSFUL** in 1m 50s. All 53 actionable tasks executed, including the 16-test unit suite, debug APK assembly and Android lint. Room emitted its existing schema-export configuration warning; lint completed with no errors.
+- Independent source-control check: `git diff --check` passed with exit code 0.
+
+### Verification pass 2 — physical device
+
+- Command: `C:\Users\tejas\AppData\Local\Android\Sdk\platform-tools\adb.exe devices -l`.
+- Result: **blocked, not passed**. On 2026-07-27 the command returned only `List of devices attached`; no connected or authorized device/emulator was available. APK installation and the required save → edit → force-stop → relaunch → reopen capture could not run.
+
+### Source-control status
+
+- No code behavior changed and no commit was created. The typed-edit milestone remains the highest-priority unblocked work once `2411DRN47I` is reconnected and authorized; AI remains optional and no provider or credential was added.
+
+## 2026-07-30 narrow typed editing reverified; physical pass still blocked
+
+### Verification pass 1 — forced automated regression
+
+- Command: `gradlew.bat testDebugUnitTest assembleDebug lintDebug --rerun-tasks --console=plain`.
+- Result: **BUILD SUCCESSFUL** with exit code 0 in 2m 56s. The regenerated results contain 16 unit tests with 0 failures and 0 errors; a fresh debug APK was written at 09:00 IST and lint completed at 09:01 IST with 0 errors and 20 existing warnings.
+- Independent source-control check: `git diff --check` passed with exit code 0 before this documentation update.
+
+### Verification pass 2 — physical device
+
+- Command: `C:\\Users\\tejas\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe devices -l`.
+- Result: **blocked, not passed**. On 2026-07-30 it returned only `List of devices attached`; no connected or authorized Android device/emulator is available. APK installation and the required save → edit → force-stop → relaunch → reopen capture could not run.
+
+### Source-control status
+
+- No application behavior changed and no commit was created. The existing typed-edit milestone remains uncommitted until the physical-device evidence is captured; no AI provider, credentials or later feature were added.
+
+## 2026-07-28 narrow typed editing reverified; device pass still blocked
+
+### Verification pass 1 — forced automated regression
+
+- Command: `gradlew.bat testDebugUnitTest assembleDebug lintDebug --rerun-tasks --console=plain`.
+- Result: **BUILD SUCCESSFUL** with exit code 0. The regenerated test XML reports 16 passing unit tests (1 starter, 2 saved-block display, 3 typed-edit, 4 mapping and 6 VoxScript parser tests); a fresh debug APK and lint report were produced.
+- Lint reported 0 errors and 20 existing warnings. Independent source-control check: `git diff --check` passed with exit code 0.
+
+### Verification pass 2 — physical device
+
+- Command: `C:\Users\tejas\AppData\Local\Android\Sdk\platform-tools\adb.exe devices -l`.
+- Result: **blocked, not passed**. On 2026-07-28 the command returned only `List of devices attached`; no connected or authorized device/emulator was available. APK installation and the required save → edit → force-stop → relaunch → reopen capture could not run.
+
+### Source-control status
+
+- No behavior changed and no commit was created. The existing typed-edit milestone stays uncommitted until its required physical-device evidence is captured. AI remains optional and no provider or credential was added.
+
+## 2026-07-28 narrow typed editing automation recheck; device pass still blocked
+
+### Verification pass 1 — automated artifacts
+
+- Command: `gradlew.bat testDebugUnitTest assembleDebug lintDebug --rerun-tasks --console=plain`.
+- Result: the command exceeded the automation's 240-second command window without returning its final console status, so it is not recorded as a new `BUILD SUCCESSFUL` console claim. Its generated evidence is complete: the test XML reports 16 tests, 0 failures and 0 errors; `app-debug.apk` was freshly written at 19:06:55 IST; and the fresh lint XML reports 0 errors and 20 existing warnings at 19:08:53 IST. The Gradle daemon then became idle and the client process exited.
+- Independent source-control check: `git diff --check` passed with exit code 0.
+
+### Verification pass 2 — physical device
+
+- Command: `C:\Users\tejas\AppData\Local\Android\Sdk\platform-tools\adb.exe devices -l`.
+- Result: **blocked, not passed**. On 2026-07-28 the command again returned only `List of devices attached`; no connected or authorized Android device/emulator was available. APK installation and the required save → edit → force-stop → relaunch → reopen capture could not run.
+
+### Source-control status
+
+- No code behavior changed and no commit was created. The typed-edit milestone remains uncommitted until its required physical-device evidence is captured; AI remains optional and no provider or credential was added.
+
+## 2026-07-30 — Organized UI, search and bounded board-capture milestone verified
+
+### Implemented
+
+- Reorganized the Material 3 interface into **Notes**, **Speak** and **Board** destinations while preserving speech capture, VoxScript previews, local note reopening and typed block editing.
+- Added literal, case-insensitive search across note titles, block text and block labels.
+- Added a real CameraX rear-camera preview with a visible permission state, framing guidance and a user-triggered still-frame capture. “Live” refers to the preview only; VoxBox does not continuously capture or upload frames.
+- Added explicit capture, processing, editable review, retake and save states. Mock proxy, remote-vision and offline-OCR results are labelled separately in the review UI.
+- Added an Android client for the local board proxy and a bundled ML Kit text-recognition fallback.
+- Added persistence that inserts the new local note and its reviewed heading, summary, concepts and visible board text together in one Room transaction.
+- Added a Node proxy with health/extraction endpoints, an 8 MiB decoded-image limit, deterministic `MOCK_VISION=1` mode and a server-side-only `OPENAI_API_KEY` contract.
+- Disabled Android backup. Cleartext localhost is allowed only in the debug manifest for USB development; a release backend requires HTTPS.
+
+### Verification pass 1 — automated
+
+- `gradlew.bat testDebugUnitTest assembleDebug lintDebug assembleDebugAndroidTest --console=plain` completed with **BUILD SUCCESSFUL**.
+- The Android unit-test report contains 36 tests, 0 failures and 0 errors. Lint contains 0 errors and 17 warnings, all non-blocking version/SDK update advisories. Debug and Android-test APKs were built.
+- The proxy's `node --test` suite passed 3/3. Its tests use mock/fake transports and made no live or billable OpenAI call.
+- Search has focused unit coverage. Physical search input was attempted but not completed because the connected device rejected the synthetic text/key-input method; no physical filtering claim is made.
+
+### Verification pass 2 — physical device
+
+- The debug APK was installed on Redmi model `2411DRN47I`, Android 16 / API 36.
+- The **Board** destination displayed a real rear-camera preview, accepted a manual still-frame capture, showed a deterministic mock result labelled `Mock response — image not analyzed`, and required explicit review/save.
+- Saving created `Mock board capture` with seven ordered local blocks. After force-stop and relaunch, the Notes library still listed that note, demonstrating persistence recovery.
+- With the proxy stopped, another captured frame reached the `Offline OCR fallback` review state. The actual frame was black/dark and had no legible writing, so the evidence verifies routing and state handling only, not OCR accuracy.
+- Canonical evidence is indexed in `evidence/board-milestone/README.md`: `speak-redesign-device.png`, `board-live.png`, `final-board-live.png`, `final-board-review.png`, `board-saved.png`, `notes-after-relaunch.png` and `offline-review-actual.png`.
+
+### Security and claim boundary
+
+- The OpenAI credential pasted into chat is exposed and must be revoked. It was not added to Android, the proxy directory or Git.
+- No real OpenAI request was made. Mock output is deterministic integration evidence and is not evidence of AI/OCR accuracy.
+- USB debug testing used `adb reverse tcp:8787 tcp:8787` to a loopback cleartext proxy. A release build must use an authenticated HTTPS service and keep its credential server-side.
+
+## 2026-08-03 — Product definition corrected and continuous multimodal MVP implemented
+
+### Design pivot
+
+- The project was re-scoped from a primarily VoxScript-driven, bounded push-to-talk/manual-still application to a general evidence-preserving structured-note tool.
+- The primary foreground workflow now offers **Voice** and **Live board** modes. Voice records until the user stops; Live board records the same audio while periodically capturing camera frames.
+- The term “continuous” is intentionally limited to a visible foreground session. No hidden always-on background microphone or surveillance service was introduced.
+- The user chooses **Runnable notes**, which structure and deduplicate evidence, or **Verbatim**, which preserves timestamped diarized utterances without AI summarization.
+- VoxScript remains as an implemented deterministic legacy/optional input method, but it is no longer the main product definition.
+
+### Android implementation
+
+- Added `AudioRecord` capture at 16 kHz mono PCM16 with 20-second WAV chunks, a final useful partial chunk and optional platform noise suppression/automatic gain control.
+- Added a bounded processing queue. If audio production outruns processing, capture pauses visibly instead of silently discarding a chunk.
+- Added HTTP contracts for diarized transcription and incremental note refinement.
+- Added a five-minute dominant-speaker learning heuristic based on diarized voiced duration. It selects only with a 58% leading share and 15-point margin; ambiguous/unavailable states and a manual speaker override are exposed. This is not biometric teacher identification.
+- Added Live board scheduling with an adjustable frame interval and change threshold. A 32×32 luminance comparison compensates for global exposure shifts so similar frames can be deleted before proxy/OCR work.
+- Added normalized, EXIF-aware diagram cropping into private note assets. Similar raw frames are deleted immediately; successfully processed changed frames are deleted only after the note revision and crops commit. Failed raw frames remain in cache for a bounded diagnostic/retry window, with startup cleanup for matching files older than 30 minutes.
+- Added one stable revisioned Markdown block per capture session, optimistic revision checks, patch idempotency/conflict detection, evidence fallback when refinement is unavailable and separate correction suggestions rather than silent factual rewriting.
+- Added local `.md`/`.markdown`/`.txt` syllabus import, SHA-256 deduplication, folder/note placement, recent-note continuation and single-note Markdown plus diagram-assets ZIP export for Obsidian.
+
+### Persistence change
+
+- Room advanced from version 1 to version 2 through additive `MIGRATION_1_2`; there is no destructive fallback.
+- New tables cover folders, note locations, syllabi, capture sessions, transcript segments, visual evidence, note assets and generated-block provenance.
+- Existing `notes` and `note_blocks` remain the historical/local note foundation. A real-device v1→v2 migration check is still required.
+
+### Proxy implementation
+
+- The loopback development proxy now exposes `/v1/audio/transcribe`, `/v1/board/extract` and `/v1/notes/refine` plus `/health`.
+- Fixed routing uses `gpt-4o-transcribe-diarize` for speaker-labelled transcription, `gpt-5.6-sol` for board/diagram evidence and `gpt-5.6-terra` for structured Markdown refinement.
+- Inputs and outputs have bounded, strict contracts; board and note Responses requests use `store: false`; media is forwarded in memory rather than persisted by the proxy.
+- The note prompt treats transcript, board text, existing Markdown and syllabus as untrusted evidence. Syllabus is context only, and a suspected mistake must be returned as a reviewable correction linked to evidence rather than silently substituted.
+
+### Verification pass 1 — automated and contract evidence
+
+- Android JVM suite: **59 tests, 0 failures and 0 errors across 21 suites**.
+- Android production `compileDebugKotlin` succeeds, including Room/KSP production compilation.
+- Backend Node suite: **7/7 tests passed** with mock/fake providers and no live or billable request.
+- Covered pure/contract areas include WAV encoding/duration, audio response parsing, dominant-speaker states, frame comparison, diagram bounds/crop handling, session models, Markdown revision decisions, syllabus import validation, Markdown/asset export rendering and proxy request/response behavior.
+- Room migration instrumentation was not added because `room-testing` is not currently installed; model and production compilation evidence do not replace a real v1→v2 database migration test.
+
+### Verification pass 2 — pending, not passed
+
+- Android lint, final APK/instrumentation gate and the exact new continuous-flow install have not yet been completed for this increment.
+- No physical-device continuous `AudioRecord` session, periodic camera-plus-audio session, v1→v2 migration, long-session resource test or new UI evidence has been captured.
+- No rotated-key OpenAI request has been made, so provider behavior, note/diarization/vision accuracy, latency and cost remain unmeasured.
+- No YouTube lecture trial has been run.
+- These gaps are explicitly pending and must not be presented as passed because the implementation compiles or mocks succeed.
+
+### Security and retention boundary
+
+- The credential previously pasted into chat remains exposed and must be revoked. It was not required for the automated verification above.
+- A replacement key must exist only in the backend process environment. The current proxy is loopback-only and lacks the authentication/TLS/rate-limiting required for release.
+- Raw transcript evidence remains local in Room; structured notes do not erase it. Durable diagram crops are retained with the note, while full processed frames are temporary.
+
+## 2026-08-03 — Integration-review correction and final automated gate
+
+This append-only entry supersedes claims in the earlier same-day continuous-MVP entry wherever they conflict. The earlier entry remains above as chronological history.
+
+### Corrected implementation facts
+
+- Independently uploaded 20-second transcription requests do not guarantee stable speaker labels. VoxBox now evaluates dominant voiced duration only inside each returned chunk. Automatic focus requires at least a 58% share and a 15-percentage-point lead; ambiguous/unavailable states preserve all evidence. A manual choice applies only to the latest chunk and expires on the next response.
+- The original five-to-six-minute persistent-teacher goal is **not implemented**. It requires future consent-aware speaker embeddings/enrolment and cross-chunk clustering, or provider-guaranteed session-stable identities. The current heuristic is chunk-local activity selection, not teacher identification.
+- Live capture is visible foreground-only. The Live screen requests that Android keep the display awake while active; Back or leaving the screen invokes the same stop-and-drain path. There is no background or screen-off capture service.
+- Audio no longer uses the earlier bounded-queue/pause design. Each completed WAV is atomically retained in private recovery storage when possible, and an independent ordered unlimited channel carries small file references. Transcription receives three total attempts. A WAV is deleted only after transcript and note success; exhausted failure retains it and persists a warning. This protects captured speech but can grow disk during slow service and still needs retained-WAV management and long-session measurement.
+- Stopping now stops microphone reads, emits a final useful partial WAV, closes the audio/frame channels, drains both workers and only then marks the session stopped.
+- Frames use a separate one-slot drop-oldest channel, so superseded camera work cannot evict audio. The change detector holds a pending candidate and promotes it to the baseline only after extraction, evidence/assets and note persistence succeed. Failure discards the candidate without advancing the last successful baseline.
+- The live Runnable path uses the backward-compatible append-only delta contract. Android builds bounded context from the continued note plus the current session, leaves complete `existingMarkdown` blank, validates the echoed content hash/revision and appends the returned delta only to the current session Markdown block. Legacy full requests remain supported; delta cannot rewrite older sections, so a deliberate full-note consolidation workflow is future work.
+- Android selects at most six evidence-relevant syllabus excerpts; the proxy accepts up to eight excerpts, each at most 2,000 characters and at most 12,000 characters in total. Legacy raw syllabus input is relevance-selected to no more than 12,000 provider-forwarded characters.
+- Reuse of the same note session/request ids with changed normalized evidence now returns an idempotency conflict instead of replaying a stale response. Release builds also require an explicit absolute HTTPS backend URL and reject unsafe/unconfigured values.
+
+### Final automated evidence
+
+- The post-fix Android `testDebugUnitTest` artifacts report **70 tests across 23 suites, 0 failures, 0 errors and 0 skipped**.
+- Android production compilation passes. The final `lintDebug` artifact reports **0 errors and 18 warnings**, and `assembleDebug` produced a **61,182,613-byte** debug APK.
+- The backend Node suite reports **11/11 passing tests** with mock/fake providers and no live or billable request. Coverage includes legacy full/delta compatibility, bounded note/syllabus context, base-hash validation and changed-evidence idempotency conflicts.
+- A focused post-fix reliability check also passed 13/13 tests covering final-partial audio emission, chunk-local speaker handling/manual expiry, persisted review Markdown and two-phase frame-baseline retry behavior.
+
+### Still pending
+
+- Android-test APK/instrumentation compilation and execution, including a Room v1→v2 migration test.
+- Physical-device continuous audio, simultaneous camera/audio, Back/leave stop-and-drain, retained-WAV recovery and full mock workflow evidence.
+- A rotated-key live OpenAI request, provider accuracy/latency/cost measurement, YouTube teaching trials and long-session battery/storage/network profiling.
+- Persistent cross-chunk teacher identity, background/screen-off capture, user-facing retained-WAV recovery/deletion controls and full-note delta consolidation are not current features.
+
+## 2026-08-03 — Android 16 continuous mock-device validation and final gate
+
+This append-only milestone supersedes the earlier same-day entries only where they say the continuous Voice/Video mock-device and Android-test gates were still pending.
+
+### Opt-in instrumentation design
+
+- Added `LiveCaptureDeviceSmokeTest`, guarded by the `voxboxLiveSmoke=true` instrumentation argument so ordinary connected tests do not unexpectedly require a microphone, camera or local proxy.
+- Split Voice and Video into independent long-running tests. Each was run standalone against the deterministic loopback mock proxy so a failure in one pipeline could not hide the other result.
+
+### Voice final-partial result
+
+- `voiceDrainsFinalPartialChunk` passed standalone on Android 16 in **9.561 seconds**.
+- Capture stopped after four seconds, before the normal 20-second boundary. Passing required the final partial PCM to become a WAV, drain through the ordered audio worker, receive mock transcription and note refinement, persist the note update and reach the `SAVED` state.
+- The test saved `live-voice-drain-saved.png` in the app external `evidence/` directory.
+
+### Video camera-plus-audio result and defect found
+
+- The first live Video attempts opened CameraX preview but never invoked `takePicture`. This exposed a real timer defect: the Compose coroutine used for periodic capture did not schedule the capture callback on the tested runtime.
+- `LiveCameraPanel` now owns a main-loop `Handler` and capture `Runnable` inside the camera `DisposableEffect`. The effect schedules timed calls and removes its callback when disposed.
+- After that fix, `videoCapturesBoardAndAudio` passed standalone on Android 16 in **32.742 seconds**.
+- Passing required CameraX timed capture, mock board extraction, concurrent continuous audio, incremental note updates, explicit Stop/drain and saved-note persistence.
+- The test saved `live-video-board-and-audio.png` before Stop and `live-video-board-and-audio-saved.png` after persistence in the app external `evidence/` directory.
+
+### Recovery-file reconciliation
+
+- Two private recovery WAVs were left by intentionally aborted diagnostic sessions, not by either passing standalone test.
+- Each file was matched to its exact `Device smoke` session id before deletion. No unrecovered-audio file remained after cleanup.
+- This verifies the final cleanup state but does not replace the planned user-facing retained-WAV review/retry/delete interface.
+
+### Final integrated build and test evidence
+
+- Android JVM unit tests: **70/70 passed across 23 suites**, with 0 failures, 0 errors and 0 skipped.
+- `lintDebug`, `assembleDebug` and `assembleDebugAndroidTest`: **BUILD SUCCESSFUL**. Lint reports **0 errors and 18 warnings**.
+- Final `app-debug.apk`: **61,182,613 bytes**; SHA-256 `DABF116DB614D0066AD3AC867C2D77BB7E344154C8B6FCAE7A563FD12CCCA0AB`.
+- Backend `npm test`: **11/11 passed** with mock/fake providers and no live/billable request.
+- Secret scan: clear; only the intentional `server/.env.example` template is present. `git diff --check` exits 0.
+
+### Claim boundary after this milestone
+
+- The two device passes establish deterministic mock plumbing for short final-partial Voice and timed CameraX-plus-audio Video sessions. They do not establish real-provider compatibility or speech, diarization, note, OCR, equation, diagram or crop accuracy.
+- Real OpenAI testing remains blocked until the exposed credential is revoked and a replacement is intentionally configured only in the proxy environment.
+- Noisy-room and competing-speaker evaluation, persistent cross-chunk teacher identity, Room v1→v2 physical migration, long-session/endurance/resource profiling, a labelled frame/crop corpus and YouTube teaching trials remain pending.

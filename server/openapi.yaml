@@ -1,0 +1,595 @@
+openapi: 3.1.0
+info:
+  title: VoxBox Live Notes Proxy API
+  version: 1.1.0
+  description: |
+    Ephemeral development proxy for board extraction, diarized audio transcription,
+    and incremental Markdown note refinement. All pipeline bodies are JSON and are
+    limited to 14 MiB. The proxy has no end-user authentication or TLS and must
+    remain loopback-only unless placed behind an authenticated HTTPS gateway.
+servers:
+  - url: http://127.0.0.1:8787
+    description: Local debug server, commonly reached from Android through adb reverse
+tags:
+  - name: Service
+  - name: Board
+  - name: Audio
+  - name: Notes
+paths:
+  /health:
+    get:
+      tags: [Service]
+      summary: Report mode, fixed model routing, and proxy retention behavior
+      operationId: getHealth
+      responses:
+        "200":
+          description: Healthy server
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /v1/board/extract:
+    post:
+      tags: [Board]
+      summary: Extract structured evidence and normalized diagram crops from one frame
+      operationId: extractBoardFrame
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BoardRequest"
+      responses:
+        "200":
+          description: Mock or provider-backed board extraction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BoardResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "413":
+          $ref: "#/components/responses/TooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "502":
+          $ref: "#/components/responses/ProviderFailure"
+        "503":
+          $ref: "#/components/responses/ProviderNotConfigured"
+  /v1/audio/transcribe:
+    post:
+      tags: [Audio]
+      summary: Transcribe one Base64 audio chunk with speaker diarization
+      operationId: transcribeAudioChunk
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AudioRequest"
+      responses:
+        "200":
+          description: Mock or provider-backed transcription with absolute session times
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AudioResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "413":
+          $ref: "#/components/responses/TooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "502":
+          $ref: "#/components/responses/ProviderFailure"
+        "503":
+          $ref: "#/components/responses/ProviderNotConfigured"
+  /v1/notes/refine:
+    post:
+      tags: [Notes]
+      summary: Refine evidence into a complete note or a bounded Markdown delta
+      description: |
+        The default full mode is backward compatible and accepts the current Markdown.
+        Delta mode accepts bounded note context and never requires the complete note.
+        The server does not own a persistent session. Successful results are cached in
+        memory for approximately 10 minutes by sessionId and requestId, with at most
+        128 cache entries. The normalized request is fingerprinted; reuse a pair only
+        to replay exactly the same logical request.
+      operationId: refineNote
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NoteRefineRequest"
+      responses:
+        "200":
+          description: Mock or provider-backed full Markdown proposal or bounded delta
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NoteRefineResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/TooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "502":
+          $ref: "#/components/responses/ProviderFailure"
+        "503":
+          $ref: "#/components/responses/ProviderNotConfigured"
+components:
+  responses:
+    BadRequest:
+      description: Invalid JSON, fields, values, Base64, or media signature
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    TooLarge:
+      description: JSON body or decoded media exceeds its limit
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    UnsupportedMediaType:
+      description: Content-Type is not application/json
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ProviderFailure:
+      description: Provider failure or invalid provider response
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ProviderNotConfigured:
+      description: Mock mode is off and OPENAI_API_KEY is absent
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    IdempotencyConflict:
+      description: The same sessionId and requestId were reused with different content
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+  schemas:
+    Source:
+      type: string
+      enum: [mock, openai]
+    HealthResponse:
+      type: object
+      additionalProperties: false
+      required: [status, mode, models, retention]
+      properties:
+        status:
+          type: string
+          const: ok
+        mode:
+          type: string
+          enum: [mock, live]
+        models:
+          type: object
+          additionalProperties: false
+          required: [vision, notes, transcription]
+          properties:
+            vision:
+              type: string
+              const: gpt-5.6-sol
+            notes:
+              type: string
+              const: gpt-5.6-terra
+            transcription:
+              type: string
+              const: gpt-4o-transcribe-diarize
+        retention:
+          type: string
+          const: in-memory-forwarding-only
+    BoardRequest:
+      type: object
+      additionalProperties: false
+      required: [imageBase64, mimeType]
+      properties:
+        imageBase64:
+          type: string
+          contentEncoding: base64
+          description: Raw Base64 image, at most 8 MiB after decoding; data URL prefixes are not accepted.
+        mimeType:
+          type: string
+          enum: [image/jpeg, image/png, image/webp]
+    DiagramRegion:
+      type: object
+      additionalProperties: false
+      required: [left, top, width, height, caption]
+      description: Normalized crop; left + width and top + height must each be no greater than 1.
+      properties:
+        left:
+          type: number
+          minimum: 0
+          maximum: 1
+        top:
+          type: number
+          minimum: 0
+          maximum: 1
+        width:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 1
+        height:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 1
+        caption:
+          type: string
+    BoardResponse:
+      type: object
+      additionalProperties: false
+      required: [title, summary, visibleText, concepts, equations, diagramRegions, confidence, warnings, source]
+      properties:
+        title:
+          type: string
+        summary:
+          type: string
+        visibleText:
+          type: array
+          items: { type: string }
+        concepts:
+          type: array
+          items: { type: string }
+        equations:
+          type: array
+          items: { type: string }
+        diagramRegions:
+          type: array
+          items:
+            $ref: "#/components/schemas/DiagramRegion"
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        warnings:
+          type: array
+          items: { type: string }
+        source:
+          $ref: "#/components/schemas/Source"
+    AudioRequest:
+      type: object
+      additionalProperties: false
+      required: [audioBase64, mimeType, sessionId, chunkId, offsetMs]
+      properties:
+        audioBase64:
+          type: string
+          contentEncoding: base64
+          description: Raw Base64 audio, at most 10 MiB after decoding; data URL prefixes are not accepted.
+        mimeType:
+          type: string
+          enum: [audio/wav, audio/x-wav, audio/mpeg, audio/mp4, audio/ogg, audio/webm, audio/flac]
+        sessionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        chunkId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        offsetMs:
+          type: integer
+          minimum: 0
+          description: Session-relative chunk start; added to provider-relative segment timestamps.
+        language:
+          type: string
+          maxLength: 16
+          default: ""
+    TranscriptSegment:
+      type: object
+      additionalProperties: false
+      required: [id, speakerId, startMs, endMs, text]
+      properties:
+        id:
+          type: string
+        speakerId:
+          type: string
+        startMs:
+          type: integer
+          minimum: 0
+        endMs:
+          type: integer
+          minimum: 0
+          description: Must be greater than or equal to startMs.
+        text:
+          type: string
+    AudioResponse:
+      type: object
+      additionalProperties: false
+      required: [sessionId, chunkId, text, durationMs, segments, source]
+      properties:
+        sessionId:
+          type: string
+        chunkId:
+          type: string
+        text:
+          type: string
+        durationMs:
+          type: integer
+          minimum: 0
+        segments:
+          type: array
+          items:
+            $ref: "#/components/schemas/TranscriptSegment"
+        source:
+          $ref: "#/components/schemas/Source"
+    NoteTranscriptSegment:
+      type: object
+      description: Unknown nested fields are currently ignored by the proxy.
+      required: [id, startMs, endMs, text]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        speakerId:
+          type: string
+          maxLength: 64
+          default: ""
+        startMs:
+          type: integer
+          minimum: 0
+        endMs:
+          type: integer
+          minimum: 0
+          description: Must be greater than or equal to startMs.
+        text:
+          type: string
+          minLength: 1
+          maxLength: 12000
+        isPrimarySpeaker:
+          type: boolean
+          default: false
+    BoardEvidence:
+      type: object
+      description: Unknown nested fields are currently ignored. List strings are truncated to 4,000 characters.
+      required: [id, capturedAtMs, visibleText, concepts, equations]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        capturedAtMs:
+          type: integer
+          minimum: 0
+        summary:
+          type: string
+          maxLength: 12000
+          default: ""
+        visibleText:
+          type: array
+          maxItems: 100
+          items: { type: string }
+        concepts:
+          type: array
+          maxItems: 40
+          items: { type: string }
+        equations:
+          type: array
+          maxItems: 40
+          items: { type: string }
+        diagramCaptions:
+          type: array
+          maxItems: 20
+          default: []
+          items: { type: string }
+    NoteRefineRequest:
+      type: object
+      additionalProperties: false
+      required: [requestId, sessionId, baseRevision, mode, notePolicy, transcriptSegments]
+      allOf:
+        - if:
+            required: [responseMode]
+            properties:
+              responseMode:
+                const: delta
+          then:
+            required: [noteContext]
+            properties:
+              existingMarkdown:
+                maxLength: 0
+      properties:
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        sessionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        baseRevision:
+          type: integer
+          minimum: 0
+        mode:
+          type: string
+          enum: [voice, video]
+        notePolicy:
+          type: string
+          enum: [runnable, verbatim]
+        primarySpeakerId:
+          type: string
+          maxLength: 64
+          default: ""
+        syllabusContext:
+          type: string
+          maxLength: 120000
+          default: ""
+          description: Legacy topic context. At most 12,000 relevance-selected characters are forwarded.
+        syllabusExcerpts:
+          type: array
+          maxItems: 8
+          description: Explicit bounded context; takes precedence over syllabusContext and totals at most 12,000 text characters.
+          items:
+            $ref: "#/components/schemas/SyllabusExcerpt"
+        existingMarkdown:
+          type: string
+          maxLength: 120000
+          default: ""
+        responseMode:
+          type: string
+          enum: [full, delta]
+          default: full
+        noteContext:
+          $ref: "#/components/schemas/NoteContext"
+        transcriptSegments:
+          type: array
+          maxItems: 80
+          items:
+            $ref: "#/components/schemas/NoteTranscriptSegment"
+        boardEvidence:
+          description: Optional board extraction adapted into note evidence.
+          anyOf:
+            - $ref: "#/components/schemas/BoardEvidence"
+            - type: "null"
+    SyllabusExcerpt:
+      type: object
+      additionalProperties: false
+      required: [id, heading, text]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        heading:
+          type: string
+          maxLength: 240
+        text:
+          type: string
+          minLength: 1
+          maxLength: 2000
+    NoteContext:
+      type: object
+      additionalProperties: false
+      required: [title, outlineMarkdown, recentMarkdown, contentSha256]
+      properties:
+        title:
+          type: string
+          maxLength: 240
+        outlineMarkdown:
+          type: string
+          maxLength: 12000
+        recentMarkdown:
+          type: string
+          maxLength: 24000
+        contentSha256:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+    Correction:
+      type: object
+      additionalProperties: false
+      required: [captured, suggested, reason, severity, evidenceIds]
+      properties:
+        captured:
+          type: string
+        suggested:
+          type: string
+        reason:
+          type: string
+        severity:
+          type: string
+          enum: [info, warning]
+        evidenceIds:
+          type: array
+          items: { type: string }
+    NoteRefineResponse:
+      oneOf:
+        - $ref: "#/components/schemas/NoteRefineFullResponse"
+        - $ref: "#/components/schemas/NoteRefineDeltaResponse"
+    NoteRefineFullResponse:
+      type: object
+      additionalProperties: false
+      required: [requestId, sessionId, baseRevision, nextRevision, title, markdown, corrections, consumedEvidenceIds, warnings, source]
+      properties:
+        requestId:
+          type: string
+        sessionId:
+          type: string
+        baseRevision:
+          type: integer
+          minimum: 0
+        nextRevision:
+          type: integer
+          minimum: 1
+          description: Always exactly baseRevision + 1.
+        title:
+          type: string
+        markdown:
+          type: string
+        corrections:
+          type: array
+          items:
+            $ref: "#/components/schemas/Correction"
+        consumedEvidenceIds:
+          type: array
+          items: { type: string }
+        warnings:
+          type: array
+          items: { type: string }
+        source:
+          $ref: "#/components/schemas/Source"
+    NoteRefineDeltaResponse:
+      type: object
+      additionalProperties: false
+      required: [requestId, sessionId, baseRevision, nextRevision, title, updateMode, baseContentSha256, markdownDelta, corrections, consumedEvidenceIds, warnings, source]
+      properties:
+        requestId:
+          type: string
+        sessionId:
+          type: string
+        baseRevision:
+          type: integer
+          minimum: 0
+        nextRevision:
+          type: integer
+          minimum: 1
+          description: Always exactly baseRevision + 1.
+        title:
+          type: string
+        updateMode:
+          type: string
+          const: delta
+        baseContentSha256:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: Echo of noteContext.contentSha256.
+        markdownDelta:
+          type: string
+          minLength: 1
+          description: Append-only Markdown for the new evidence; it does not restate the complete note.
+        corrections:
+          type: array
+          items:
+            $ref: "#/components/schemas/Correction"
+        consumedEvidenceIds:
+          type: array
+          items: { type: string }
+        warnings:
+          type: array
+          items: { type: string }
+        source:
+          $ref: "#/components/schemas/Source"
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message]
+          properties:
+            code:
+              type: string
+            message:
+              type: string

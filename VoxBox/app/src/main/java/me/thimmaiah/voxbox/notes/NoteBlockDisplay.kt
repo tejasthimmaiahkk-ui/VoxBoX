@@ -3,6 +3,7 @@ package me.thimmaiah.voxbox.notes
 /** UI-safe projection of a persisted block for the read-only note-detail view. */
 sealed interface ReadOnlyNoteBlock {
     data class Paragraph(val text: String) : ReadOnlyNoteBlock
+    data class Markdown(val text: String) : ReadOnlyNoteBlock
     data class Heading(val text: String) : ReadOnlyNoteBlock
     data class BulletPoint(val text: String) : ReadOnlyNoteBlock
     data class PieChart(val percentage: Int, val color: String, val label: String) : ReadOnlyNoteBlock
@@ -11,6 +12,7 @@ sealed interface ReadOnlyNoteBlock {
 fun NoteBlockEntity.toReadOnlyBlockOrNull(): ReadOnlyNoteBlock? {
     return when (type) {
     NoteBlockType.PARAGRAPH.name -> ReadOnlyNoteBlock.Paragraph(content)
+    NoteBlockType.MARKDOWN.name -> ReadOnlyNoteBlock.Markdown(content)
     NoteBlockType.HEADING.name -> ReadOnlyNoteBlock.Heading(content)
     NoteBlockType.BULLET_POINT.name -> ReadOnlyNoteBlock.BulletPoint(content)
     NoteBlockType.PIE_CHART.name -> {

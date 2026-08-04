@@ -1,43 +1,104 @@
 package me.thimmaiah.voxbox.ui.theme
 
-import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 
-private val DarkColorScheme = darkColorScheme(
-    primary = Purple80,
-    secondary = PurpleGrey80,
-    tertiary = Pink80
+private val VoxBoxDarkColorScheme = darkColorScheme(
+    primary = VoxIndigoDark,
+    onPrimary = VoxOnIndigoDark,
+    primaryContainer = VoxIndigoContainerDark,
+    onPrimaryContainer = VoxOnIndigoContainerDark,
+    secondary = VoxTealDark,
+    onSecondary = VoxOnTealDark,
+    secondaryContainer = VoxTealContainerDark,
+    onSecondaryContainer = VoxOnTealContainerDark,
+    tertiary = VoxGoldDark,
+    onTertiary = VoxOnGoldDark,
+    tertiaryContainer = VoxGoldContainerDark,
+    onTertiaryContainer = VoxOnGoldContainerDark,
+    error = VoxErrorDark,
+    onError = VoxOnErrorDark,
+    errorContainer = VoxErrorContainerDark,
+    onErrorContainer = VoxOnErrorContainerDark,
+    background = VoxNight,
+    onBackground = VoxOnNight,
+    surface = VoxNight,
+    onSurface = VoxOnNight,
+    surfaceVariant = VoxSurfaceVariantDark,
+    onSurfaceVariant = VoxOnSurfaceVariantDark,
+    outline = VoxOutlineDark,
+    outlineVariant = VoxOutlineVariantDark,
+    inverseSurface = VoxInverseSurfaceDark,
+    inverseOnSurface = VoxInverseOnSurfaceDark,
+    inversePrimary = VoxInversePrimaryDark,
+    surfaceDim = VoxNight,
+    surfaceBright = VoxSurfaceBrightDark,
+    surfaceContainerLowest = VoxSurfaceLowestDark,
+    surfaceContainerLow = VoxSurfaceLowDark,
+    surfaceContainer = VoxSurfaceDark,
+    surfaceContainerHigh = VoxSurfaceHighDark,
+    surfaceContainerHighest = VoxSurfaceHighestDark,
 )
 
-private val LightColorScheme = lightColorScheme(
-    primary = Purple40,
-    secondary = PurpleGrey40,
-    tertiary = Pink40
+private val VoxBoxLightColorScheme = lightColorScheme(
+    primary = VoxIndigo,
+    onPrimary = VoxOnIndigo,
+    primaryContainer = VoxIndigoContainer,
+    onPrimaryContainer = VoxOnIndigoContainer,
+    secondary = VoxTeal,
+    onSecondary = VoxOnTeal,
+    secondaryContainer = VoxTealContainer,
+    onSecondaryContainer = VoxOnTealContainer,
+    tertiary = VoxGold,
+    onTertiary = VoxOnGold,
+    tertiaryContainer = VoxGoldContainer,
+    onTertiaryContainer = VoxOnGoldContainer,
+    error = VoxError,
+    onError = VoxOnError,
+    errorContainer = VoxErrorContainer,
+    onErrorContainer = VoxOnErrorContainer,
+    background = VoxPaper,
+    onBackground = VoxOnPaper,
+    surface = VoxPaper,
+    onSurface = VoxOnPaper,
+    surfaceVariant = VoxSurfaceVariant,
+    onSurfaceVariant = VoxOnSurfaceVariant,
+    outline = VoxOutline,
+    outlineVariant = VoxOutlineVariant,
+    inverseSurface = VoxInverseSurface,
+    inverseOnSurface = VoxInverseOnSurface,
+    inversePrimary = VoxInversePrimary,
+    surfaceDim = VoxSurfaceDim,
+    surfaceBright = VoxPaper,
+    surfaceContainerLowest = VoxSurfaceLowest,
+    surfaceContainerLow = VoxSurfaceLow,
+    surfaceContainer = VoxSurface,
+    surfaceContainerHigh = VoxSurfaceHigh,
+    surfaceContainerHighest = VoxSurfaceHighest,
+)
 
-    /* Other default colors to override
-    background = Color(0xFFFFFBFE),
-    surface = Color(0xFFFFFBFE),
-    onPrimary = Color.White,
-    onSecondary = Color.White,
-    onTertiary = Color.White,
-    onBackground = Color(0xFF1C1B1F),
-    onSurface = Color(0xFF1C1B1F),
-    */
+private val VoxBoxShapes = Shapes(
+    extraSmall = RoundedCornerShape(8.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(18.dp),
+    large = RoundedCornerShape(24.dp),
+    extraLarge = RoundedCornerShape(32.dp),
 )
 
 @Composable
 fun VoxBoxTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    // Dynamic color is available on Android 12+
-    dynamicColor: Boolean = true,
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val colorScheme = when {
@@ -46,13 +107,14 @@ fun VoxBoxTheme(
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
 
-        darkTheme -> DarkColorScheme
-        else -> LightColorScheme
+        darkTheme -> VoxBoxDarkColorScheme
+        else -> VoxBoxLightColorScheme
     }
 
     MaterialTheme(
         colorScheme = colorScheme,
-        typography = Typography,
+        typography = VoxBoxTypography,
+        shapes = VoxBoxShapes,
         content = content
     )
 }

@@ -7,6 +7,7 @@ enum class NoteBlockType {
     HEADING,
     BULLET_POINT,
     PIE_CHART,
+    MARKDOWN,
 }
 
 data class NewNoteBlock(

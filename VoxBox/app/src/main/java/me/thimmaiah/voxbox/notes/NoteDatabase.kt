@@ -6,12 +6,25 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [NoteEntity::class, NoteBlockEntity::class],
-    version = 1,
+    entities = [
+        NoteEntity::class,
+        NoteBlockEntity::class,
+        FolderEntity::class,
+        NoteLocationEntity::class,
+        SyllabusEntity::class,
+        CaptureSessionEntity::class,
+        TranscriptSegmentEntity::class,
+        VisualEvidenceEntity::class,
+        NoteAssetEntity::class,
+        BlockProvenanceEntity::class,
+    ],
+    version = 2,
     exportSchema = true,
 )
 abstract class NoteDatabase : RoomDatabase() {
     abstract fun noteDao(): NoteDao
+    abstract fun libraryStructureDao(): LibraryStructureDao
+    abstract fun captureSessionDao(): CaptureSessionDao
 
     companion object {
         @Volatile
@@ -22,7 +35,10 @@ abstract class NoteDatabase : RoomDatabase() {
                 context.applicationContext,
                 NoteDatabase::class.java,
                 "voxbox-notes.db",
-            ).build().also { instance = it }
+            )
+                .addMigrations(MIGRATION_1_2)
+                .build()
+                .also { instance = it }
         }
     }
 }
