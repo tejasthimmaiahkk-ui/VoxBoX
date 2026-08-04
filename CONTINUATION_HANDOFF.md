@@ -271,7 +271,7 @@ remaining steps are account-level and are yours to run.
 Follow `server/DEPLOYMENT.md`. Summary:
 
 1. Deploy `server/` to Render (blueprint provided at the repo root as `render.yaml`), Google Cloud Run, or
-   Fly.io. All three have a $0 tier adequate for a demo. `server/Dockerfile` works on all three.
+   Fly.io. All three have a $0 tier adequate for a demo. `Dockerfile` at the repo root works on all three.
 2. Paste `OPENROUTER_API_KEY` and `VOXBOX_CLIENT_TOKEN` into the host's secret store.
 3. Run the three verification curls in the runbook. The unauthenticated one must return `401`.
 4. Build the release APK with `-PVOXBOX_API_BASE_URL=https://…` and `-PVOXBOX_CLIENT_TOKEN=…`,

@@ -41,12 +41,18 @@ high-value secret (see the honesty note at the bottom), but it must not be commi
    `sync: false`. Paste them there.
 4. Deploy. Your URL will look like `https://voxbox-proxy.onrender.com`.
 
-> **The blueprint must sit at the repository root, not in `server/`.** Every path inside
-> `render.yaml` is resolved from the repository root regardless of where the file itself lives, so a
-> blueprint in `server/` with `dockerfilePath: ./Dockerfile` sends Render looking for a Dockerfile at
-> the root and the build fails with `Exited with status 1 while building your code`. The root
-> blueprint uses `dockerfilePath: ./server/Dockerfile` and `dockerContext: ./server`, which also
-> keeps the Android project out of the build context.
+> **Both `render.yaml` and `Dockerfile` live at the repository root, and that is deliberate.**
+> Render resolves the Dockerfile path from the repo root, and — importantly — a service that already
+> exists keeps the build settings it was created with. Editing the blueprint afterwards does not
+> reliably re-sync them, so a Dockerfile nested in `server/` keeps failing with
+> `failed to read dockerfile: open Dockerfile: no such file or directory` even after the blueprint
+> looks correct. A root Dockerfile matches Render's defaults, so it works whether or not the
+> blueprint is re-read. `.dockerignore` keeps the context to a few kilobytes by excluding the Android
+> project, evidence and docs.
+>
+> If a build still fails with that message, the service is holding a stale path. Fix it in
+> **Settings → Build & Deploy**: set *Dockerfile Path* to `./Dockerfile` and *Docker Build Context
+> Directory* to `.`, then use **Manual Deploy → Deploy latest commit**.
 
 The free tier sleeps after about 15 minutes idle and takes 30–60 seconds to wake. See step 5.
 

@@ -9,10 +9,11 @@ services:
   - type: web
     name: voxbox-proxy
     runtime: docker
-    # Repo-root-relative. The build context is scoped to server/ so the image never sees the
-    # Android project, and so the Dockerfile's COPY paths resolve.
-    dockerfilePath: ./server/Dockerfile
-    dockerContext: ./server
+    # Both at the repo root, which is what Render defaults to. An existing service keeps the build
+    # settings it was created with, so a nested Dockerfile path is not reliably picked up from a
+    # later blueprint edit. `.dockerignore` keeps the context small.
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     plan: free
     region: oregon
     healthCheckPath: /health

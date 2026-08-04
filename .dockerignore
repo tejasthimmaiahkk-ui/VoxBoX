@@ -1,0 +1,28 @@
+# The image needs only server/package.json and server/server.mjs. Everything else is excluded so the
+# build context stays a few kilobytes instead of shipping the whole Android project.
+.git/
+.gitignore
+
+# Android project, including build outputs and APKs.
+VoxBox/
+
+# Project records, evidence screenshots and generated deliverables.
+docs/
+evidence/
+outputs/
+*.md
+
+# Server files not needed at runtime.
+server/test/
+server/node_modules/
+server/.env
+server/.env.*
+server/README.md
+server/DEPLOYMENT.md
+server/openapi.yaml
+
+# Platform and editor noise.
+render.yaml
+.idea/
+.vscode/
+*.log
