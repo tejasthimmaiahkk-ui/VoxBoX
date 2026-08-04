@@ -16,6 +16,13 @@ val releaseApiBaseUrlForBuildConfig = configuredReleaseApiBaseUrl.ifBlank {
     "https://invalid.voxbox.local"
 }
 
+// Authenticates the app to the VoxBox proxy. This is not the provider key: the provider key stays
+// in the server environment and never reaches the APK. A token compiled into an APK is extractable,
+// so the server pairs it with a rate limit and a daily request budget.
+val voxBoxClientToken = providers.gradleProperty("VOXBOX_CLIENT_TOKEN")
+    .orElse(providers.environmentVariable("VOXBOX_CLIENT_TOKEN"))
+val configuredClientToken = voxBoxClientToken.orNull?.trim().orEmpty()
+
 fun buildConfigString(value: String): String =
     "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
 
@@ -45,12 +52,24 @@ android {
                 "VOXBOX_API_BASE_URL",
                 buildConfigString("http://127.0.0.1:8787"),
             )
+            // Optional locally: a mock proxy with no configured token accepts unauthenticated calls,
+            // which keeps the loopback device-test workflow working without extra setup.
+            buildConfigField(
+                "String",
+                "VOXBOX_CLIENT_TOKEN",
+                buildConfigString(configuredClientToken),
+            )
         }
         release {
             buildConfigField(
                 "String",
                 "VOXBOX_API_BASE_URL",
                 buildConfigString(releaseApiBaseUrlForBuildConfig),
+            )
+            buildConfigField(
+                "String",
+                "VOXBOX_CLIENT_TOKEN",
+                buildConfigString(configuredClientToken),
             )
             optimization {
                 enable = false
@@ -64,6 +83,31 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+}
+
+val validateVoxBoxReleaseClientToken by tasks.registering {
+    group = "verification"
+    description = "Validates the proxy client token required by release builds."
+    inputs.property("voxBoxClientToken", voxBoxClientToken.map(String::trim).orElse(""))
+    doLast {
+        val token = inputs.properties["voxBoxClientToken"]?.toString()?.trim().orEmpty()
+        if (token.isBlank()) {
+            throw GradleException(
+                "A release client token is required so the deployed proxy can reject unauthenticated " +
+                    "callers. Set -PVOXBOX_CLIENT_TOKEN=<token> or the VOXBOX_CLIENT_TOKEN environment " +
+                    "variable to the same value configured on the server.",
+            )
+        }
+        if (token.length < 24) {
+            throw GradleException(
+                "VOXBOX_CLIENT_TOKEN must be at least 24 characters. Generate one with " +
+                    "`openssl rand -base64 32`.",
+            )
+        }
+        if (token.any { it.isWhitespace() }) {
+            throw GradleException("VOXBOX_CLIENT_TOKEN must not contain whitespace.")
+        }
     }
 }
 
@@ -105,7 +149,7 @@ val validateVoxBoxReleaseApiBaseUrl by tasks.registering {
 
 tasks.configureEach {
     if (name == "preReleaseBuild") {
-        dependsOn(validateVoxBoxReleaseApiBaseUrl)
+        dependsOn(validateVoxBoxReleaseApiBaseUrl, validateVoxBoxReleaseClientToken)
     }
 }
 

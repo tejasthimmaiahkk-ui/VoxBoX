@@ -21,6 +21,7 @@ import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import me.thimmaiah.voxbox.network.applyVoxBoxClientAuth
 import me.thimmaiah.voxbox.network.validatedVoxBoxUrl
 import me.thimmaiah.voxbox.network.voxBoxApiEndpoint
 
@@ -110,6 +111,7 @@ class HttpBoardExtractionClient(
         connection.instanceFollowRedirects = false
         connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
         connection.setRequestProperty("Accept", "application/json")
+            connection.applyVoxBoxClientAuth()
         connection.setRequestProperty("Cache-Control", "no-store")
         connection.setFixedLengthStreamingMode(contentLength)
     }

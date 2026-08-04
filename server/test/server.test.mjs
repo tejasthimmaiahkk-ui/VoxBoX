@@ -35,10 +35,14 @@ async function start(options) {
   return `http://127.0.0.1:${server.address().port}`;
 }
 
-async function post(base, path, body) {
+const CLIENT_TOKEN = "test-client-token";
+
+async function post(base, path, body, { token = CLIENT_TOKEN } = {}) {
+  const headers = { "content-type": "application/json" };
+  if (token !== null) headers.authorization = `Bearer ${token}`;
   return fetch(`${base}${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers,
     body: JSON.stringify(body),
   });
 }
@@ -78,6 +82,7 @@ test("health and all pipelines work deterministically in mock mode", async () =>
     mode: "mock",
     models: { vision: VISION_MODEL, notes: NOTE_MODEL, transcription: TRANSCRIPTION_MODEL },
     retention: "in-memory-forwarding-only",
+    budget: { day: new Date().toISOString().slice(0, 10), used: 0, limit: 1_500 },
   });
 
   const boardResponse = await post(base, "/v1/board/extract", {
@@ -126,7 +131,7 @@ test("health and all pipelines work deterministically in mock mode", async () =>
 test("invalid media and unknown fields are rejected before any provider call", async () => {
   let calls = 0;
   const base = await start({
-    env: { OPENAI_API_KEY: "test-only" },
+    env: { OPENAI_API_KEY: "test-only", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
     fetchImpl: async () => {
       calls += 1;
       throw new Error("must not run");
@@ -160,7 +165,7 @@ test("live board mode sends the fixed vision model and validates diagram crops",
     warnings: [],
   };
   const base = await start({
-    env: { OPENAI_API_KEY: "test-only-secret" },
+    env: { OPENAI_API_KEY: "test-only-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
     fetchImpl: async (url, options) => {
       request = { url, options };
       return new Response(JSON.stringify({ output_text: JSON.stringify(expected) }), {
@@ -196,7 +201,7 @@ test("out-of-bounds diagram regions from the provider are rejected", async () =>
     warnings: [],
   };
   const base = await start({
-    env: { OPENAI_API_KEY: "test" },
+    env: { OPENAI_API_KEY: "test", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
     fetchImpl: async () => new Response(JSON.stringify({ output_text: JSON.stringify(invalid) }), { status: 200 }),
   });
   const response = await post(base, "/v1/board/extract", {
@@ -210,7 +215,7 @@ test("out-of-bounds diagram regions from the provider are rejected", async () =>
 test("live transcription uses multipart diarized transcription and applies the chunk offset", async () => {
   let request;
   const base = await start({
-    env: { OPENAI_API_KEY: "audio-secret" },
+    env: { OPENAI_API_KEY: "audio-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
     fetchImpl: async (url, options) => {
       request = { url, options };
       return new Response(JSON.stringify({
@@ -256,7 +261,7 @@ test("live note refinement enforces request identity and caches idempotent repla
     warnings: [],
   };
   const base = await start({
-    env: { OPENAI_API_KEY: "note-secret" },
+    env: { OPENAI_API_KEY: "note-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
     fetchImpl: async (_url, options) => {
       calls += 1;
       upstreamBody = JSON.parse(options.body);
@@ -282,7 +287,7 @@ test("note refinement rejects empty evidence and invalid revision relationships"
   assert.equal(empty.status, 400);
 
   const live = await start({
-    env: { OPENAI_API_KEY: "test" },
+    env: { OPENAI_API_KEY: "test", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
     fetchImpl: async () => new Response(JSON.stringify({
       output_text: JSON.stringify({
         requestId: "request-1",
@@ -337,7 +342,7 @@ test("delta refinement uses bounded note context and selects relevant syllabus t
     warnings: [],
   };
   const base = await start({
-    env: { OPENAI_API_KEY: "note-secret" },
+    env: { OPENAI_API_KEY: "note-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
     fetchImpl: async (_url, options) => {
       calls += 1;
       upstreamBody = JSON.parse(options.body);
@@ -376,7 +381,7 @@ test("note idempotency rejects changed evidence instead of replaying a stale res
     warnings: [],
   };
   const base = await start({
-    env: { OPENAI_API_KEY: "note-secret" },
+    env: { OPENAI_API_KEY: "note-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
     fetchImpl: async () => {
       calls += 1;
       return new Response(JSON.stringify({ output_text: JSON.stringify(expected) }), { status: 200 });
@@ -395,7 +400,7 @@ test("note idempotency rejects changed evidence instead of replaying a stale res
 test("note provider cannot cite evidence outside the request", async () => {
   const requestBody = noteRequest({ requestId: "bad-evidence" });
   const base = await start({
-    env: { OPENAI_API_KEY: "note-secret" },
+    env: { OPENAI_API_KEY: "note-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
     fetchImpl: async () => new Response(JSON.stringify({
       output_text: JSON.stringify({
         requestId: requestBody.requestId,
@@ -470,7 +475,7 @@ function providerError(status, body, headers = {}) {
 
 test("an exhausted provider quota is preserved as 429 and marked non-retryable", async () => {
   const base = await start({
-    env: { OPENAI_API_KEY: "audio-secret" },
+    env: { OPENAI_API_KEY: "audio-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
     fetchImpl: async () => providerError(
       429,
       { error: { message: "You exceeded your current quota.", type: "insufficient_quota", code: "insufficient_quota" } },
@@ -490,7 +495,7 @@ test("an exhausted provider quota is preserved as 429 and marked non-retryable",
 
 test("a transient rate limit stays retryable and reports its retry delay", async () => {
   const base = await start({
-    env: { OPENAI_API_KEY: "audio-secret" },
+    env: { OPENAI_API_KEY: "audio-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
     fetchImpl: async () => providerError(
       429,
       { error: { message: "Rate limit reached.", type: "rate_limit_error", code: "rate_limit_exceeded" } },
@@ -510,7 +515,7 @@ test("a transient rate limit stays retryable and reports its retry delay", async
 
 test("a rejected server credential is non-retryable and never echoes the key", async () => {
   const base = await start({
-    env: { OPENAI_API_KEY: "audio-secret" },
+    env: { OPENAI_API_KEY: "audio-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
     fetchImpl: async () => providerError(401, {
       error: { message: "Incorrect API key provided.", type: "invalid_request_error", code: "invalid_api_key" },
     }),
@@ -526,7 +531,7 @@ test("a rejected server credential is non-retryable and never echoes the key", a
 
 test("vision and note provider failures use the same classification", async () => {
   const visionBase = await start({
-    env: { OPENAI_API_KEY: "vision-secret" },
+    env: { OPENAI_API_KEY: "vision-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
     fetchImpl: async () => providerError(429, {
       error: { message: "quota", type: "insufficient_quota", code: "insufficient_quota" },
     }),
@@ -539,7 +544,7 @@ test("vision and note provider failures use the same classification", async () =
   assert.equal((await vision.json()).error.code, "vision_quota_exhausted");
 
   const noteBase = await start({
-    env: { OPENAI_API_KEY: "note-secret" },
+    env: { OPENAI_API_KEY: "note-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
     fetchImpl: async () => providerError(500, { error: { message: "server error", type: "server_error" } }),
   });
   const note = await post(noteBase, "/v1/notes/refine", noteRequest({ requestId: "provider-500" }));
@@ -551,7 +556,7 @@ test("vision and note provider failures use the same classification", async () =
 
 test("a non-JSON provider error body still classifies without leaking its contents", async () => {
   const base = await start({
-    env: { OPENAI_API_KEY: "audio-secret" },
+    env: { OPENAI_API_KEY: "audio-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
     fetchImpl: async () => new Response("<html>Gateway timeout</html>", {
       status: 504,
       headers: { "content-type": "text/html" },
@@ -566,4 +571,96 @@ test("a non-JSON provider error body still classifies without leaking its conten
   assert.equal(payload.retryable, true);
   assert.equal(payload.provider.status, 504);
   assert.ok(!body.includes("<html>"));
+});
+
+test("a live server refuses to forward anything without a configured client token", async () => {
+  const base = await start({ env: { OPENAI_API_KEY: "audio-secret" } });
+
+  const response = await post(base, "/v1/audio/transcribe", audioRequest());
+  assert.equal(response.status, 503);
+  const payload = (await response.json()).error;
+  assert.equal(payload.code, "client_auth_not_configured");
+  assert.equal(payload.retryable, false);
+});
+
+test("pipeline routes reject a missing or wrong client token", async () => {
+  const base = await start({
+    env: { MOCK_AI: "1", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+  });
+
+  const missing = await post(base, "/v1/audio/transcribe", audioRequest(), { token: null });
+  assert.equal(missing.status, 401);
+  assert.equal((await missing.json()).error.code, "unauthorized");
+
+  const wrong = await post(base, "/v1/audio/transcribe", audioRequest(), { token: "not-the-token" });
+  assert.equal(wrong.status, 401);
+  assert.equal((await wrong.json()).error.retryable, false);
+
+  const correct = await post(base, "/v1/audio/transcribe", audioRequest());
+  assert.equal(correct.status, 200);
+});
+
+test("health stays reachable without a token so platform checks and pingers work", async () => {
+  const base = await start({
+    env: { MOCK_AI: "1", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+  });
+
+  const health = await fetch(`${base}/health`).then((response) => response.json());
+  assert.equal(health.status, "ok");
+  // The health payload must never carry a credential.
+  assert.ok(!JSON.stringify(health).includes(CLIENT_TOKEN));
+});
+
+test("a burst beyond the rate limit is rejected with a retry delay", async () => {
+  const base = await start({
+    env: {
+      MOCK_AI: "1",
+      VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN,
+      VOXBOX_RATE_LIMIT_MAX: "3",
+      VOXBOX_RATE_LIMIT_WINDOW_MS: "60000",
+    },
+  });
+
+  for (let index = 0; index < 3; index += 1) {
+    assert.equal((await post(base, "/v1/audio/transcribe", audioRequest())).status, 200);
+  }
+  const limited = await post(base, "/v1/audio/transcribe", audioRequest());
+  assert.equal(limited.status, 429);
+  const payload = (await limited.json()).error;
+  assert.equal(payload.code, "rate_limited");
+  assert.equal(payload.retryable, true);
+  assert.ok(payload.retryAfterSeconds >= 1);
+});
+
+test("the daily budget caps billable calls and never counts mock calls", async () => {
+  const live = await start({
+    env: {
+      OPENAI_API_KEY: "audio-secret",
+      VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN,
+      VOXBOX_DAILY_REQUEST_BUDGET: "2",
+    },
+    fetchImpl: async () => new Response(JSON.stringify({
+      text: "ok",
+      duration: 1,
+      segments: [{ id: "seg_1", speaker: "A", start: 0, end: 1, text: "ok" }],
+    }), { status: 200, headers: { "content-type": "application/json" } }),
+  });
+
+  assert.equal((await post(live, "/v1/audio/transcribe", audioRequest())).status, 200);
+  assert.equal((await post(live, "/v1/audio/transcribe", audioRequest())).status, 200);
+  const exhausted = await post(live, "/v1/audio/transcribe", audioRequest());
+  assert.equal(exhausted.status, 429);
+  const payload = (await exhausted.json()).error;
+  assert.equal(payload.code, "daily_budget_exhausted");
+  assert.equal(payload.retryable, false);
+
+  // Mock mode reaches no provider, so it must not consume the budget.
+  const mock = await start({
+    env: { MOCK_AI: "1", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN, VOXBOX_DAILY_REQUEST_BUDGET: "1" },
+  });
+  for (let index = 0; index < 3; index += 1) {
+    assert.equal((await post(mock, "/v1/audio/transcribe", audioRequest())).status, 200);
+  }
+  const health = await fetch(`${mock}/health`).then((response) => response.json());
+  assert.equal(health.budget.used, 0);
 });

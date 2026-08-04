@@ -66,10 +66,14 @@ internal fun parseVoxBoxServiceFailure(
     val provider = error?.get("provider") as? JsonObject
     val declaredRetryable = (error?.get("retryable") as? JsonPrimitive)?.booleanOrNull
     val kind = when {
-        code.endsWith("_quota_exhausted") -> VoxBoxFailureKind.QUOTA_EXHAUSTED
-        code.endsWith("_rate_limited") -> VoxBoxFailureKind.RATE_LIMITED
-        code.endsWith("_auth_error") || code == "openai_not_configured" -> VoxBoxFailureKind.AUTH
-        code.endsWith("_request_rejected") || status == 400 || status == 409 ||
+        // Provider-side exhaustion and the proxy's own daily budget both mean "stop asking today".
+        code.endsWith("quota_exhausted") || code == "daily_budget_exhausted" ->
+            VoxBoxFailureKind.QUOTA_EXHAUSTED
+        code.endsWith("rate_limited") -> VoxBoxFailureKind.RATE_LIMITED
+        code.endsWith("auth_error") || code == "openai_not_configured" ||
+            code == "unauthorized" || code == "client_auth_not_configured" ->
+            VoxBoxFailureKind.AUTH
+        code.endsWith("request_rejected") || status == 400 || status == 409 ||
             status == 413 || status == 415 -> VoxBoxFailureKind.REJECTED
         else -> VoxBoxFailureKind.UNAVAILABLE
     }
@@ -83,10 +87,14 @@ internal fun parseVoxBoxServiceFailure(
         code = code.ifBlank { "http_$status" },
         message = message,
         retryable = retryable,
-        retryAfterSeconds = (provider?.get("retryAfterSeconds") as? JsonPrimitive)
-            ?.takeUnless(JsonPrimitive::isString)
-            ?.intOrNull
-            ?.takeIf { it >= 0 },
+        // Proxy-level limits report the delay on the error itself; provider failures nest it.
+        retryAfterSeconds = listOfNotNull(error, provider)
+            .firstNotNullOfOrNull { source ->
+                (source["retryAfterSeconds"] as? JsonPrimitive)
+                    ?.takeUnless(JsonPrimitive::isString)
+                    ?.intOrNull
+                    ?.takeIf { it >= 0 }
+            },
         providerRequestId = provider?.string("requestId")?.takeIf(String::isNotBlank),
     )
 }

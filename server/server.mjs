@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { createHash } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -990,6 +990,115 @@ function isMock(env) {
   return env.MOCK_AI === "1" || env.MOCK_VISION === "1";
 }
 
+const DEFAULT_RATE_LIMIT_WINDOW_MS = 60_000;
+const DEFAULT_RATE_LIMIT_MAX = 60;
+const DEFAULT_DAILY_REQUEST_BUDGET = 1_500;
+
+function positiveIntegerFromEnv(value, fallback) {
+  const parsed = Number.parseInt(String(value ?? "").trim(), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+/** Compares two secrets without leaking their length or a byte-wise match position. */
+function secretsMatch(provided, expected) {
+  const a = createHash("sha256").update(String(provided)).digest();
+  const b = createHash("sha256").update(String(expected)).digest();
+  return timingSafeEqual(a, b);
+}
+
+/**
+ * Rejects a pipeline request that does not present the configured client token.
+ *
+ * Live mode refuses to serve at all without `VOXBOX_CLIENT_TOKEN`, so a deployed proxy can never
+ * become an open relay billed to the project's provider account. Mock mode stays open when no token
+ * is configured, which keeps the loopback device-test workflow working without extra setup; a mock
+ * server makes no billable call.
+ */
+function requireClientToken(request, env) {
+  const expected = String(env.VOXBOX_CLIENT_TOKEN ?? "").trim();
+  if (!expected) {
+    if (isMock(env)) return;
+    throw new RequestError(
+      503,
+      "client_auth_not_configured",
+      "This server has no VOXBOX_CLIENT_TOKEN configured, so it refuses to forward provider requests.",
+      { retryable: false },
+    );
+  }
+  const header = String(request.headers.authorization ?? "");
+  const provided = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
+  if (!provided || !secretsMatch(provided, expected)) {
+    throw new RequestError(
+      401,
+      "unauthorized",
+      "A valid client token is required.",
+      { retryable: false },
+    );
+  }
+}
+
+/**
+ * Fixed-window request limiter keyed by caller address.
+ *
+ * State is in-memory and per instance, so it resets on restart and does not coordinate across
+ * replicas. That is adequate for the single-instance free-tier deployment this project targets and
+ * must be replaced with shared state before running more than one instance.
+ */
+function createRateLimiter({ windowMs, max }) {
+  const hits = new Map();
+  return {
+    check(key, now = Date.now()) {
+      const entry = hits.get(key);
+      if (!entry || now >= entry.resetAt) {
+        hits.set(key, { count: 1, resetAt: now + windowMs });
+        return { allowed: true, retryAfterSeconds: 0 };
+      }
+      entry.count += 1;
+      if (entry.count > max) {
+        return { allowed: false, retryAfterSeconds: Math.max(1, Math.ceil((entry.resetAt - now) / 1_000)) };
+      }
+      return { allowed: true, retryAfterSeconds: 0 };
+    },
+    // Bounded cleanup so a long-running instance cannot accumulate stale keys.
+    sweep(now = Date.now()) {
+      for (const [key, entry] of hits) if (now >= entry.resetAt) hits.delete(key);
+    },
+  };
+}
+
+/**
+ * Hard ceiling on billable provider calls per UTC day.
+ *
+ * This counts requests, not currency. It is a circuit breaker that bounds the damage from a leaked
+ * client token; it is not an accurate spend estimate.
+ */
+function createDailyBudget({ limit }) {
+  let day = "";
+  let used = 0;
+  return {
+    consume(now = new Date()) {
+      const today = now.toISOString().slice(0, 10);
+      if (today !== day) {
+        day = today;
+        used = 0;
+      }
+      if (used >= limit) return { allowed: false, used, limit };
+      used += 1;
+      return { allowed: true, used, limit };
+    },
+    snapshot(now = new Date()) {
+      const today = now.toISOString().slice(0, 10);
+      return { day: today, used: today === day ? used : 0, limit };
+    },
+  };
+}
+
+function callerKey(request) {
+  // Render, Cloud Run and Fly all terminate TLS upstream, so the socket address is the proxy's.
+  const forwarded = String(request.headers["x-forwarded-for"] ?? "").split(",")[0].trim();
+  return forwarded || request.socket?.remoteAddress || "unknown";
+}
+
 function apiKeyOrThrow(env) {
   if (!env.OPENAI_API_KEY) {
     throw new RequestError(
@@ -1033,20 +1142,59 @@ function requestFingerprint(value) {
 
 export function createVoxBoxServer({ env = process.env, fetchImpl = globalThis.fetch } = {}) {
   const noteCache = createIdempotencyCache();
+  const rateLimiter = createRateLimiter({
+    windowMs: positiveIntegerFromEnv(env.VOXBOX_RATE_LIMIT_WINDOW_MS, DEFAULT_RATE_LIMIT_WINDOW_MS),
+    max: positiveIntegerFromEnv(env.VOXBOX_RATE_LIMIT_MAX, DEFAULT_RATE_LIMIT_MAX),
+  });
+  const dailyBudget = createDailyBudget({
+    limit: positiveIntegerFromEnv(env.VOXBOX_DAILY_REQUEST_BUDGET, DEFAULT_DAILY_REQUEST_BUDGET),
+  });
   return createServer(async (request, response) => {
     try {
       const url = new URL(request.url ?? "/", "http://localhost");
       const mock = isMock(env);
       if (request.method === "GET" && url.pathname === "/health") {
+        // Deliberately unauthenticated: platform health checks and uptime pingers must reach it,
+        // and it exposes no evidence, no provider data and no credential.
         return sendJson(response, 200, {
           status: "ok",
           mode: mock ? "mock" : "live",
           models: { vision: VISION_MODEL, notes: NOTE_MODEL, transcription: TRANSCRIPTION_MODEL },
           retention: "in-memory-forwarding-only",
+          budget: dailyBudget.snapshot(),
         });
       }
       if (request.method !== "POST") {
         return sendJson(response, 404, { error: { code: "not_found", message: "Route not found." } });
+      }
+
+      const pipelineRoute = url.pathname === "/v1/board/extract" ||
+        url.pathname === "/v1/audio/transcribe" ||
+        url.pathname === "/v1/notes/refine";
+      if (pipelineRoute) {
+        requireClientToken(request, env);
+        rateLimiter.sweep();
+        const limit = rateLimiter.check(callerKey(request));
+        if (!limit.allowed) {
+          throw new RequestError(
+            429,
+            "rate_limited",
+            `Too many requests. Retry in ${limit.retryAfterSeconds} second(s).`,
+            { retryable: true, retryAfterSeconds: limit.retryAfterSeconds },
+          );
+        }
+        if (!mock) {
+          // Only billable calls consume the budget; mock mode never reaches a provider.
+          const budget = dailyBudget.consume();
+          if (!budget.allowed) {
+            throw new RequestError(
+              429,
+              "daily_budget_exhausted",
+              `This server reached its configured daily limit of ${budget.limit} provider requests.`,
+              { retryable: false },
+            );
+          }
+        }
       }
       if (url.pathname === "/v1/board/extract") {
         const input = validateBoardInput(await readJson(request));
@@ -1085,6 +1233,9 @@ export function createVoxBoxServer({ env = process.env, fetchImpl = globalThis.f
           // `retryable` lets the client skip retries that can only fail again, such as an
           // exhausted quota, a rejected server credential or a malformed request.
           retryable: known ? error.details?.retryable ?? error.status >= 500 : true,
+          ...(known && Number.isInteger(error.details?.retryAfterSeconds)
+            ? { retryAfterSeconds: error.details.retryAfterSeconds }
+            : {}),
           ...(known && error.details?.provider ? { provider: error.details.provider } : {}),
         },
       });

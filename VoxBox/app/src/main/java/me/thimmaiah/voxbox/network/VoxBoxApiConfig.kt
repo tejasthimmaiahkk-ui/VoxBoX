@@ -1,10 +1,29 @@
 package me.thimmaiah.voxbox.network
 
+import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
 import me.thimmaiah.voxbox.BuildConfig
 
 private const val UNCONFIGURED_RELEASE_HOST = "invalid.voxbox.local"
+
+/**
+ * Authenticates this build to the VoxBox proxy.
+ *
+ * This is not the AI provider key. The provider key stays in the server environment and never
+ * reaches the APK. A token compiled into an APK is extractable by anyone holding the APK, so the
+ * server pairs it with a per-caller rate limit and a daily request budget that bound the damage.
+ *
+ * Debug builds may leave it blank; a mock proxy with no configured token accepts unauthenticated
+ * calls, which keeps the loopback device-test workflow working without extra setup.
+ */
+internal fun voxBoxClientToken(): String = BuildConfig.VOXBOX_CLIENT_TOKEN.trim()
+
+/** Adds the bearer credential when this build has one. */
+internal fun HttpURLConnection.applyVoxBoxClientAuth() {
+    val token = voxBoxClientToken()
+    if (token.isNotEmpty()) setRequestProperty("Authorization", "Bearer $token")
+}
 
 internal fun voxBoxApiEndpoint(path: String): String {
     require(path.startsWith('/') && !path.startsWith("//")) {

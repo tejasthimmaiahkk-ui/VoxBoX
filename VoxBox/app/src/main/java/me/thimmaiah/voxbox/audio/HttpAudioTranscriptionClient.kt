@@ -21,6 +21,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import me.thimmaiah.voxbox.network.VoxBoxServiceFailure
+import me.thimmaiah.voxbox.network.applyVoxBoxClientAuth
 import me.thimmaiah.voxbox.network.parseVoxBoxServiceFailure
 import me.thimmaiah.voxbox.network.transportFailure
 import me.thimmaiah.voxbox.network.validatedVoxBoxUrl
@@ -85,6 +86,7 @@ class HttpAudioTranscriptionClient(
             connection.instanceFollowRedirects = false
             connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
             connection.setRequestProperty("Accept", "application/json")
+            connection.applyVoxBoxClientAuth()
             connection.setRequestProperty("Cache-Control", "no-store")
             connection.setFixedLengthStreamingMode(body.size)
             connection.outputStream.use { it.write(body) }

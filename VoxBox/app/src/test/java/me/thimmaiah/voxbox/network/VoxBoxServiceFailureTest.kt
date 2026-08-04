@@ -93,4 +93,40 @@ class VoxBoxServiceFailureTest {
         assertTrue(failure.retryable)
         assertEquals("transport_error", failure.code)
     }
+
+    @Test
+    fun proxyLevelAuthAndBudgetFailuresAreClassified() {
+        val unauthorized = parse(
+            401,
+            """{"error":{"code":"unauthorized","message":"A valid client token is required.","retryable":false}}""",
+        )
+        assertEquals(VoxBoxFailureKind.AUTH, unauthorized.kind)
+        assertFalse(unauthorized.retryable)
+
+        val unconfigured = parse(
+            503,
+            """{"error":{"code":"client_auth_not_configured","message":"No token configured.","retryable":false}}""",
+        )
+        assertEquals(VoxBoxFailureKind.AUTH, unconfigured.kind)
+
+        val budget = parse(
+            429,
+            """{"error":{"code":"daily_budget_exhausted","message":"Daily limit reached.","retryable":false}}""",
+        )
+        assertEquals(VoxBoxFailureKind.QUOTA_EXHAUSTED, budget.kind)
+        assertFalse(budget.retryable)
+    }
+
+    @Test
+    fun proxyRateLimitReportsItsDelayFromTheErrorItself() {
+        val failure = parse(
+            429,
+            """{"error":{"code":"rate_limited","message":"Too many requests.","retryable":true,"retryAfterSeconds":9}}""",
+        )
+
+        assertEquals(VoxBoxFailureKind.RATE_LIMITED, failure.kind)
+        assertTrue(failure.retryable)
+        assertEquals(9, failure.retryAfterSeconds)
+        assertEquals("Too many requests. (retry after 9s)", failure.describe())
+    }
 }
