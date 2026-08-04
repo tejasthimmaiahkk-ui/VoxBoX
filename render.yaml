@@ -1,13 +1,18 @@
 # Render blueprint for the VoxBox proxy.
 #
-# Secrets are deliberately declared with `sync: false`, which means Render prompts for them in the
-# dashboard and never stores them in this file or in Git.
+# This file must live at the repository root: Render looks for render.yaml there, and every path
+# inside it is resolved from the repository root regardless of where the referenced files sit.
+#
+# Secrets are declared with `sync: false`, so Render prompts for them in the dashboard and they
+# never enter this file or Git.
 services:
   - type: web
     name: voxbox-proxy
     runtime: docker
-    dockerfilePath: ./Dockerfile
-    dockerContext: .
+    # Repo-root-relative. The build context is scoped to server/ so the image never sees the
+    # Android project, and so the Dockerfile's COPY paths resolve.
+    dockerfilePath: ./server/Dockerfile
+    dockerContext: ./server
     plan: free
     region: oregon
     healthCheckPath: /health

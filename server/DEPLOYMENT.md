@@ -35,10 +35,18 @@ high-value secret (see the honesty note at the bottom), but it must not be commi
 ### Option A — Render (simplest)
 
 1. Push this repository to GitHub.
-2. In Render, choose **New → Blueprint** and point it at the repo. It reads `server/render.yaml`.
+2. In Render, choose **New → Blueprint** and point it at the repo. It reads `render.yaml` from the
+   **repository root**.
 3. Render prompts for `OPENROUTER_API_KEY` and `VOXBOX_CLIENT_TOKEN` because both are marked
    `sync: false`. Paste them there.
 4. Deploy. Your URL will look like `https://voxbox-proxy.onrender.com`.
+
+> **The blueprint must sit at the repository root, not in `server/`.** Every path inside
+> `render.yaml` is resolved from the repository root regardless of where the file itself lives, so a
+> blueprint in `server/` with `dockerfilePath: ./Dockerfile` sends Render looking for a Dockerfile at
+> the root and the build fails with `Exited with status 1 while building your code`. The root
+> blueprint uses `dockerfilePath: ./server/Dockerfile` and `dockerContext: ./server`, which also
+> keeps the Android project out of the build context.
 
 The free tier sleeps after about 15 minutes idle and takes 30–60 seconds to wake. See step 5.
 
