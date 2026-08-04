@@ -716,3 +716,95 @@ test("model output wrapped in a Markdown fence or preamble is still accepted", a
   assert.equal(failed.status, 502);
   assert.equal((await failed.json()).error.code, "invalid_upstream_response");
 });
+
+function verifyRequest(overrides = {}) {
+  return {
+    sessionId: "session-verify",
+    requestId: "verify-1",
+    noteMarkdown: "# Photosynthesis\n\n- Photosynthesis releases CO2 and consumes O2.\n",
+    subjectHint: "Biology",
+    ...overrides,
+  };
+}
+
+test("the verification pass returns review findings and never replacement note content", async () => {
+  let sent;
+  const modelReply = {
+    findings: [{
+      claim: "Photosynthesis releases CO2 and consumes O2.",
+      issue: "The gas direction is inverted.",
+      suggestion: "Photosynthesis consumes CO2 and releases O2.",
+      kind: "concept",
+      severity: "warning",
+      confidence: 0.95,
+    }],
+    checkedFormulas: ["6CO2 + 6H2O -> C6H12O6 + 6O2"],
+    checkedConcepts: ["photosynthesis"],
+    warnings: [],
+  };
+  const base = await start({
+    env: { OPENROUTER_API_KEY: "provider-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+    fetchImpl: async (_url, options) => {
+      sent = JSON.parse(options.body);
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: JSON.stringify(modelReply) } }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+
+  const response = await post(base, "/v1/notes/verify", verifyRequest());
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.source, "openrouter");
+  assert.equal(body.sessionId, "session-verify");
+  assert.equal(body.findings.length, 1);
+  assert.equal(body.findings[0].kind, "concept");
+  assert.equal(body.findings[0].severity, "warning");
+  // The contract must not be able to carry a rewritten note.
+  assert.ok(!Object.keys(body).some((key) => /markdown/i.test(key)));
+  assert.equal(sent.response_format.json_schema.name, "note_verification");
+  assert.ok(sent.messages[0].content.includes("reviewing, not editing"));
+});
+
+test("verification requires the client token and is covered by the daily budget", async () => {
+  const base = await start({
+    env: {
+      OPENROUTER_API_KEY: "provider-secret",
+      VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN,
+      VOXBOX_DAILY_REQUEST_BUDGET: "1",
+    },
+    fetchImpl: async () => new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({ findings: [], checkedFormulas: [], checkedConcepts: [], warnings: [] }) } }],
+    }), { status: 200, headers: { "content-type": "application/json" } }),
+  });
+
+  const unauthenticated = await post(base, "/v1/notes/verify", verifyRequest(), { token: null });
+  assert.equal(unauthenticated.status, 401);
+
+  assert.equal((await post(base, "/v1/notes/verify", verifyRequest())).status, 200);
+  const overBudget = await post(base, "/v1/notes/verify", verifyRequest());
+  assert.equal(overBudget.status, 429);
+  assert.equal((await overBudget.json()).error.code, "daily_budget_exhausted");
+});
+
+test("verification rejects an oversized note and invalid model findings", async () => {
+  const mock = await start({ env: { MOCK_AI: "1", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN } });
+  const tooLong = await post(mock, "/v1/notes/verify", verifyRequest({ noteMarkdown: "x".repeat(24_001) }));
+  assert.equal(tooLong.status, 400);
+  const mocked = await post(mock, "/v1/notes/verify", verifyRequest());
+  assert.equal(mocked.status, 200);
+  assert.equal((await mocked.json()).source, "mock");
+
+  const badSeverity = await start({
+    env: { OPENROUTER_API_KEY: "provider-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+    fetchImpl: async () => new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({
+        findings: [{ claim: "a", issue: "b", suggestion: "c", kind: "concept", severity: "critical", confidence: 0.5 }],
+        checkedFormulas: [], checkedConcepts: [], warnings: [],
+      }) } }],
+    }), { status: 200, headers: { "content-type": "application/json" } }),
+  });
+  const rejected = await post(badSeverity, "/v1/notes/verify", verifyRequest());
+  assert.equal(rejected.status, 502);
+  assert.equal((await rejected.json()).error.code, "invalid_upstream_response");
+});
