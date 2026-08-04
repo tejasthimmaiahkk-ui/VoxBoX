@@ -19,9 +19,9 @@ The legacy bounded speech/manual Board results remain valid for those exact code
 
 Updated 2026-08-04.
 
-- Android JVM unit suite: **82 tests, 0 failures/errors/skips across 27 suites** (was 70 across 23).
+- Android JVM unit suite: **84 tests, 0 failures/errors/skips across 27 suites** (was 70 across 23).
 - Android production `compileDebugKotlin`: **passed**, including Room/KSP production compilation.
-- Backend Node suite: **16/16 passed** with mock/fake providers and no live or billable request (was 11/11).
+- Backend Node suite: **21/21 passed** with mock/fake providers and no live or billable request (was 11/11). The five newest cover client-token auth, the rate limit and the daily budget.
 - Opt-in Android 16 mock-device Voice test: **passed standalone in 11.136 seconds** on 2026-08-04 against the redesigned UI (device `5dfb3db8`, model 2411DRN47I, Android 16).
 - Opt-in Android 16 mock-device Video test: **passed standalone in 32.339 seconds** on 2026-08-04 against the redesigned UI.
 - Proxy authentication, re-run on the same device 2026-08-04 after the auth change:
@@ -30,7 +30,7 @@ Updated 2026-08-04.
   - Direct gate check against the token-requiring proxy: no token → `401`, wrong token → `401`, correct token → `400` (auth passed, body invalid), `/health` → `200` unauthenticated.
   - One first-attempt failure was a cold-start flake, not a product defect: `IllegalStateException: No compose hierarchies found` inside `prepareSmoke` before any network call, immediately after reinstalling. The activity cold start measured 2,378 ms. It passed on retry after a force-stop. Allow the app to settle after an install before starting an instrumentation run on this device.
 - Final `lintDebug`, `assembleDebug` and `assembleDebugAndroidTest`: **BUILD SUCCESSFUL**; lint has 0 errors and 18 warnings.
-- Final `app-debug.apk`: **61,182,613 bytes**, SHA-256 `85190FA5E46A6017BE52FD68C82C792F4DBCB8F9B862E2A412F8C73B72F884E8`.
+- Final `app-debug.apk` (built with no client token, as the loopback workflow uses): **61,182,613 bytes**, SHA-256 `DADE6052C897090B2F065AACF72396161BBF7898301B4A74F51F5BC3F7B19B3C`.
 - Secret scan: **clear**; only `server/.env.example` is present as an environment template. `git diff --check`: **exit 0**.
 - Real rotated-key provider test: **not run**. The account was rejected at generation time with an upstream `429`.
 - End-to-end confirmation that board evidence reaches the note provider: **passed on device 2026-08-04** in mock mode. The Video note reached three `## Board evidence` sections, which the proxy emits only when the request actually carries a `boardEvidence` object.
