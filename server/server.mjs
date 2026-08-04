@@ -159,11 +159,119 @@ const MOCK_BOARD_RESULT = Object.freeze({
 });
 
 class RequestError extends Error {
-  constructor(status, code, message) {
+  constructor(status, code, message, details = null) {
     super(message);
     this.status = status;
     this.code = code;
+    // Optional structured diagnostics such as { retryable, provider: { status, type, ... } }.
+    // Never populated from request bodies or credentials.
+    this.details = details;
   }
+}
+
+const MAX_PROVIDER_ERROR_BYTES = 8 * 1024;
+const MAX_RETRY_AFTER_SECONDS = 3_600;
+
+function boundedProviderString(value, max = 64) {
+  return typeof value === "string" ? value.trim().slice(0, max) : "";
+}
+
+function retryAfterSeconds(headers) {
+  for (const name of ["retry-after", "x-ratelimit-reset-requests", "x-ratelimit-reset-tokens"]) {
+    const raw = String(headers.get(name) ?? "").trim();
+    if (!raw) continue;
+    // Only plain second/millisecond forms are honoured; HTTP-date and other formats are ignored.
+    const match = /^(\d+(?:\.\d+)?)(ms|s)?$/.exec(raw);
+    if (!match) continue;
+    const value = Number.parseFloat(match[1]);
+    if (!Number.isFinite(value)) continue;
+    const seconds = Math.ceil(match[2] === "ms" ? value / 1_000 : value);
+    if (seconds >= 0 && seconds <= MAX_RETRY_AFTER_SECONDS) return seconds;
+  }
+  return null;
+}
+
+/**
+ * Reads a bounded provider error body so quota and rate-limit failures stay distinguishable.
+ *
+ * The proxy never logs or forwards request payloads or credentials; only the provider's own
+ * error classification, request id and retry hints are retained.
+ */
+async function describeProviderFailure(upstream) {
+  let type = "";
+  let code = "";
+  let message = "";
+  try {
+    const raw = (await upstream.text()).slice(0, MAX_PROVIDER_ERROR_BYTES);
+    const error = JSON.parse(raw)?.error;
+    if (error && typeof error === "object") {
+      type = boundedProviderString(error.type);
+      code = boundedProviderString(error.code);
+      message = boundedProviderString(error.message, 300);
+    }
+  } catch {
+    // A missing or non-JSON provider error body is normal; status and headers still classify it.
+  }
+  return {
+    status: upstream.status,
+    type,
+    code,
+    message,
+    requestId: boundedProviderString(upstream.headers.get("x-request-id"), 128),
+    retryAfterSeconds: retryAfterSeconds(upstream.headers),
+    remainingRequests: boundedProviderString(upstream.headers.get("x-ratelimit-remaining-requests"), 32),
+    remainingTokens: boundedProviderString(upstream.headers.get("x-ratelimit-remaining-tokens"), 32),
+  };
+}
+
+/**
+ * Maps an upstream failure onto a proxy status the Android client can act on.
+ *
+ * `429` is preserved so the client can separate an exhausted account from a transient rate limit
+ * instead of treating every provider failure as a retryable gateway error.
+ */
+async function providerFailure(kind, upstream) {
+  const provider = await describeProviderFailure(upstream);
+  const quotaExhausted = provider.type === "insufficient_quota" || provider.code === "insufficient_quota";
+  let status = 502;
+  let code = `${kind}_provider_error`;
+  let retryable = true;
+  let message = `The ${kind} provider failed with status ${provider.status}.`;
+
+  if (provider.status === 429 && quotaExhausted) {
+    status = 429;
+    code = `${kind}_quota_exhausted`;
+    retryable = false;
+    message = `The ${kind} provider rejected the request because this account has no remaining quota. ` +
+      "Add credits or raise the project budget before retrying.";
+  } else if (provider.status === 429) {
+    status = 429;
+    code = `${kind}_rate_limited`;
+    retryable = true;
+    message = provider.retryAfterSeconds == null
+      ? `The ${kind} provider is rate limiting this account. Retry shortly.`
+      : `The ${kind} provider is rate limiting this account. Retry in ${provider.retryAfterSeconds} second(s).`;
+  } else if (provider.status === 401 || provider.status === 403) {
+    code = `${kind}_auth_error`;
+    retryable = false;
+    message = `The ${kind} provider rejected the server credential. Configure a valid key in the proxy environment.`;
+  } else if (provider.status >= 400 && provider.status < 500) {
+    code = `${kind}_request_rejected`;
+    retryable = false;
+    message = `The ${kind} provider rejected this request (status ${provider.status}).`;
+  }
+
+  console.error(
+    `VoxBox ${kind} provider failure:`,
+    JSON.stringify({
+      upstreamStatus: provider.status,
+      type: provider.type,
+      code: provider.code,
+      requestId: provider.requestId,
+      retryAfterSeconds: provider.retryAfterSeconds,
+    }),
+  );
+  return new RequestError(status, code, message, { retryable, provider });
 }
 
 function sendJson(response, status, value) {
@@ -630,7 +738,7 @@ async function callBoardVision({ apiKey, imageBase64, mimeType, fetchImpl }) {
     }),
   });
   if (!upstream.ok) {
-    throw new RequestError(502, "vision_provider_error", `Vision provider failed with status ${upstream.status}.`);
+    throw await providerFailure("vision", upstream);
   }
   const outputText = extractOutputText(await upstream.json());
   if (!outputText) throw new RequestError(502, "invalid_upstream_response", "Vision provider returned no text output.");
@@ -772,7 +880,7 @@ async function callNoteProvider({ apiKey, request, fetchImpl }) {
     }),
   });
   if (!upstream.ok) {
-    throw new RequestError(502, "note_provider_error", `Note provider failed with status ${upstream.status}.`);
+    throw await providerFailure("note", upstream);
   }
   const outputText = extractOutputText(await upstream.json());
   if (!outputText) throw new RequestError(502, "invalid_upstream_response", "Note provider returned no text output.");
@@ -797,7 +905,7 @@ async function callTranscriptionProvider({ apiKey, input, fetchImpl }) {
     body: form,
   });
   if (!upstream.ok) {
-    throw new RequestError(502, "transcription_provider_error", `Transcription provider failed with status ${upstream.status}.`);
+    throw await providerFailure("transcription", upstream);
   }
   const payload = await upstream.json();
   if (typeof payload?.text !== "string" || typeof payload?.duration !== "number" || !Array.isArray(payload?.segments)) {
@@ -884,7 +992,12 @@ function isMock(env) {
 
 function apiKeyOrThrow(env) {
   if (!env.OPENAI_API_KEY) {
-    throw new RequestError(503, "openai_not_configured", "Server-side OpenAI access is not configured.");
+    throw new RequestError(
+      503,
+      "openai_not_configured",
+      "Server-side OpenAI access is not configured.",
+      { retryable: false },
+    );
   }
   return env.OPENAI_API_KEY;
 }
@@ -969,6 +1082,10 @@ export function createVoxBoxServer({ env = process.env, fetchImpl = globalThis.f
         error: {
           code: known ? error.code : "provider_unavailable",
           message: known ? error.message : "The configured provider is unavailable.",
+          // `retryable` lets the client skip retries that can only fail again, such as an
+          // exhausted quota, a rejected server credential or a malformed request.
+          retryable: known ? error.details?.retryable ?? error.status >= 500 : true,
+          ...(known && error.details?.provider ? { provider: error.details.provider } : {}),
         },
       });
     }

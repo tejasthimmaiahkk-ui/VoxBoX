@@ -17,18 +17,28 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
+import me.thimmaiah.voxbox.network.VoxBoxServiceFailure
+import me.thimmaiah.voxbox.network.parseVoxBoxServiceFailure
+import me.thimmaiah.voxbox.network.transportFailure
 import me.thimmaiah.voxbox.network.validatedVoxBoxUrl
 import me.thimmaiah.voxbox.network.voxBoxApiEndpoint
 
 private const val MAX_AUDIO_BYTES = 10 * 1024 * 1024
 private const val MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 
-class AudioTranscriptionException(message: String, cause: Throwable? = null) : Exception(message, cause)
+class AudioTranscriptionException(
+    message: String,
+    cause: Throwable? = null,
+    /** Present when the proxy answered with a classified failure. */
+    val failure: VoxBoxServiceFailure? = null,
+) : Exception(message, cause) {
+    /** False only when the proxy stated that retrying this exact chunk cannot succeed. */
+    val retryable: Boolean
+        get() = failure?.retryable ?: true
+}
 
 class HttpAudioTranscriptionClient(
     endpoint: String = voxBoxApiEndpoint("/v1/audio/transcribe"),
@@ -60,7 +70,11 @@ class HttpAudioTranscriptionClient(
         val connection = try {
             connectionFactory(endpointUrl)
         } catch (error: IOException) {
-            throw AudioTranscriptionException("The transcription service is unavailable.", error)
+            throw AudioTranscriptionException(
+                "The transcription service is unavailable.",
+                error,
+                transportFailure("The transcription service is unavailable."),
+            )
         }
         try {
             connection.requestMethod = "POST"
@@ -77,13 +91,13 @@ class HttpAudioTranscriptionClient(
             val status = connection.responseCode
             if (status !in 200..299) {
                 val errorBody = connection.errorStream?.use(::readUtf8Limited).orEmpty()
-                val detail = runCatching {
-                    json.parseToJsonElement(errorBody).jsonObject["error"]
-                        ?.jsonObject?.get("message")?.jsonPrimitive?.contentOrNull
-                }.getOrNull()
-                throw AudioTranscriptionException(
-                    detail?.take(300) ?: "The transcription service returned HTTP $status.",
+                val failure = parseVoxBoxServiceFailure(
+                    status = status,
+                    body = errorBody,
+                    json = json,
+                    fallbackMessage = "The transcription service returned HTTP $status.",
                 )
+                throw AudioTranscriptionException(failure.describe(), failure = failure)
             }
             parseAudioTranscriptionResponse(connection.inputStream.use(::readUtf8Limited), json)
         } catch (error: CancellationException) {
@@ -91,9 +105,17 @@ class HttpAudioTranscriptionClient(
         } catch (error: AudioTranscriptionException) {
             throw error
         } catch (error: SocketTimeoutException) {
-            throw AudioTranscriptionException("The transcription service timed out.", error)
+            throw AudioTranscriptionException(
+                "The transcription service timed out.",
+                error,
+                transportFailure("The transcription service timed out."),
+            )
         } catch (error: IOException) {
-            throw AudioTranscriptionException("The transcription service is unavailable.", error)
+            throw AudioTranscriptionException(
+                "The transcription service is unavailable.",
+                error,
+                transportFailure("The transcription service is unavailable."),
+            )
         } finally {
             connection.disconnect()
         }

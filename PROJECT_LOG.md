@@ -508,3 +508,154 @@ This append-only milestone supersedes the earlier same-day entries only where th
 - The two device passes establish deterministic mock plumbing for short final-partial Voice and timed CameraX-plus-audio Video sessions. They do not establish real-provider compatibility or speech, diarization, note, OCR, equation, diagram or crop accuracy.
 - Real OpenAI testing remains blocked until the exposed credential is revoked and a replacement is intentionally configured only in the proxy environment.
 - Noisy-room and competing-speaker evaluation, persistent cross-chunk teacher identity, Room v1→v2 physical migration, long-session/endurance/resource profiling, a labelled frame/crop corpus and YouTube teaching trials remain pending.
+
+## 2026-08-04 — Board-evidence contract defect, provider-failure classification, retained-audio controls and UI redesign
+
+This append-only milestone continues from the 2026-08-04 live-provider diagnosis. It does not change
+any earlier claim level. No real OpenAI generation was observed in this increment, so every accuracy,
+endurance and YouTube item remains pending.
+
+### Defect found by reading the note-refinement request contract
+
+`HttpNoteRefinementClient.toJson()` built board evidence with
+`boardEvidence?.let { put(...) } ?: put("boardEvidence", JsonNull)`. `JsonObjectBuilder.put` returns
+the **previous** value for the key, which is `null` for a new key, so the elvis branch always ran and
+overwrote real board evidence with `null`.
+
+Consequences of the defect:
+
+- A frame-only note update carries no transcript segments, so the proxy correctly rejected it with
+  `At least one transcript segment or boardEvidence item is required`. That is exactly the unexplained
+  live-session failure recorded earlier the same day; it needed no quota to reproduce.
+- Board evidence therefore never reached the note provider in any build. Every Live board note update
+  fell back to the local unrefined evidence path.
+
+The builder now branches explicitly. Two request-serialization tests
+(`NoteRefinementRequestJsonTest`) pin that a frame-only request keeps its `boardEvidence` object and
+that an audio-only request still sends an explicit `null`. The previous suite only covered response
+parsing, which is why the defect was invisible to automated tests.
+
+### Proxy provider-failure classification
+
+`server/server.mjs` no longer collapses every upstream failure into `502`:
+
+- A bounded (8 KiB) provider error body is parsed for `error.type`, `error.code` and a truncated
+  message; the response headers supply `x-request-id`, `Retry-After` / rate-limit reset and the
+  remaining request/token counters.
+- Upstream `429` is preserved. `insufficient_quota` becomes `<kind>_quota_exhausted` with
+  `retryable: false`; any other `429` becomes `<kind>_rate_limited` with `retryable: true`.
+- `401`/`403` become `<kind>_auth_error`, other `4xx` become `<kind>_request_rejected`, and both are
+  non-retryable. `5xx` and unreadable bodies stay `<kind>_provider_error` and retryable.
+- Every error response now carries `retryable`, and classified provider failures carry a `provider`
+  detail object. The proxy logs only that classification — never request bodies, media or the key.
+
+`server/openapi.yaml` and `server/README.md` document the new envelope, the `429` responses and the
+classification table.
+
+### Android retry policy and retained-audio controls
+
+- `network/VoxBoxServiceFailure.kt` parses the shared envelope into a typed failure. An unparseable
+  body is retryable only for server-side statuses, so a rejected request is never replayed.
+- `AudioTranscriptionException` and `NoteRefinementException` now carry that failure. The three-attempt
+  transcription loop stops immediately on a non-retryable failure instead of burning two more attempts
+  and retaining more audio, and the persisted note warning states whether retries were attempted.
+- The live UI shows a typed banner for quota, rate-limit, credential and availability failures with the
+  matching remedy.
+- Retained recovery WAVs are now first-class. Their file names carry the session offset and duration
+  (files written before this change still list with a duration derived from the WAV header), the
+  ViewModel rebuilds the list from disk, and each file can be recovered or deleted from the setup
+  screen. Recovery re-transcribes the WAV, persists its diarized segments as evidence and appends a
+  labelled `## Recovered audio` section to the original note through the existing revision-guarded
+  path. It deliberately does not re-run AI refinement: the note has moved on, so a delta cannot be
+  validated against it and captured speech must not be silently reinterpreted. Deleting states plainly
+  that the audio evidence is gone.
+
+This closes the "user-facing retained-WAV recovery/deletion controls" gate at the implementation and
+JVM-test level. It has not yet been exercised on the physical device.
+
+### UI and UX redesign
+
+- `ui/VoxBoxIcons.kt` adds a self-contained outline icon set built as `ImageVector` path data on a
+  shared 24 dp grid. Material 3 1.4 no longer brings `material-icons-core` onto the classpath, and the
+  extended artifact would add a large amount of unused drawable data to an already 61 MB debug APK.
+- `ui/VoxBoxDesign.kt` grew from three helpers into a real design system: tone-mapped status pills with
+  an optional pulse, section cards and section headers, selectable choice rows, chips and a wrapping
+  chip group, stat tiles, actionable banners and empty states.
+- Stacked full-width outlined buttons whose selection was encoded as a `✓` prefix inside the label are
+  gone. Selection now uses a radio-style indicator or a chip, so assistive technology announces the
+  state instead of reading a tick character as part of the label.
+- Chip groups wrap with `FlowRow` rather than scrolling horizontally. The device smoke test resolves
+  the single scrollable node with `onNode(hasScrollAction())`, so a second scroll container on the same
+  screen would have broken it.
+- The Live setup screen is now five numbered sections with mode tiles, a note-destination chooser, note
+  style, camera-efficiency sliders with value readouts, and context. The running screen leads with a
+  pulsing LIVE card, queue/retained stat tiles and a destructive-coloured stop button.
+- The Notes library replaces the folder button stack with chips, moves note creation to an extended FAB
+  and uses real empty states. The Board screen gains a circular shutter, a status pill and banner-based
+  errors.
+- Unreachable legacy composables in `VoxBoxScreen.kt` (`SpeakScreen`, `CaptureCard`, `TranscriptCard`,
+  `PermissionAndRecognizerCard`, `StructuredPreview`) were removed. They were dead after the Speak
+  destination started opening the live-session UI. `PieChartVisual` is retained because saved
+  `PIE_CHART` blocks still render through it, and `speech/VoiceCaptureViewModel.kt` and the VoxScript
+  source remain in the tree as legacy evidence.
+- Every string and content description the two instrumentation tests match on was preserved:
+  `One session, one living note`, `New note title`, `Live board`, `Continuous audio`,
+  `Camera + continuous audio`, `Stop and finish note`, `SAVED`, `Start continuous voice session`,
+  `Start continuous video session`, the `Notes`/`Live`/`Board` navigation descriptions, and the board
+  `Live board camera preview`, `Capture board frame` and `Save board capture as note` descriptions.
+
+### Automated evidence for this increment
+
+- Android JVM unit tests: **82 tests across 27 suites, 0 failures, 0 errors, 0 skipped** (up from 70
+  across 23; the twelve new tests cover request serialization, failure classification, retained-audio
+  naming and recovery formatting, and note-preview comment filtering).
+- `compileDebugKotlin`, `lintDebug`, `assembleDebug` and `assembleDebugAndroidTest`: **BUILD
+  SUCCESSFUL**. Lint reports **0 errors and 18 warnings**; all 18 are dependency-version and target-API
+  advisories, unchanged in kind from the previous milestone.
+- `app-debug.apk`: 61,182,613 bytes, SHA-256
+  `85190FA5E46A6017BE52FD68C82C792F4DBCB8F9B862E2A412F8C73B72F884E8`.
+- Backend `node --test`: **16/16 passed** (11 previous plus 5 new provider-classification tests) with
+  mocks and fakes only. No live or billable request was made.
+- Secret scan is clear and `git diff --check` exits 0.
+
+### Android 16 device verification of this increment
+
+Run on device `5dfb3db8` (model 2411DRN47I, Android 16) against the deterministic loopback mock proxy
+with `adb reverse tcp:8787 tcp:8787`. Each scenario was run standalone.
+
+- `voiceDrainsFinalPartialChunk`: **passed in 11.136 seconds**.
+- `videoCapturesBoardAndAudio`: **passed in 32.339 seconds**.
+- Both passed against the redesigned UI, so the redesign did not regress either pipeline. Fresh
+  screenshots are in `evidence/redesign-2026-08-04/`.
+
+**The board-evidence fix is confirmed end to end on the device.** The Video note reached three
+`## Board evidence` sections. The proxy's `mockNotePatch` emits that heading only when
+`request.boardEvidence` is present, so board evidence now demonstrably survives serialization, reaches
+`/v1/notes/refine` and is consumed by the note path. Before the fix that request would have been
+rejected with HTTP 400 and produced a local `## Captured evidence (needs review)` fallback instead.
+
+Gradle's `connectedDebugAndroidTest` cannot install on this device: HyperOS rejects the split
+install-session commit that ddmlib uses with `INSTALL_FAILED_USER_RESTRICTED: Install canceled by
+user`. A plain streamed `adb install -r` is not blocked, so the scenarios were driven directly with
+`adb shell am instrument`. The exact commands are recorded in `docs/TEST_PLAN.md`.
+
+### One display fix found by looking at the screenshots
+
+The first device run showed the internal `<!-- voxbox-review:start -->` and `<!-- voxbox-review:end -->`
+markers rendered as literal text above and below the review-flags section. Those markers are
+structural — `stripReviewAnnotations` uses them — so they must stay in the stored Markdown, but a
+Markdown reader would never display an HTML comment. `MarkdownNotePreview` now filters comment-only
+lines, with `MarkdownNotePreviewTest` pinning that partial and inline comments are not swallowed. Both
+device scenarios were re-run after this change and passed with the times quoted above.
+
+### Claim boundary after this milestone
+
+- Provider-failure classification is verified against fake upstream responses only. No real `429`,
+  `insufficient_quota` or successful generation has been observed.
+- Retained-audio recovery has JVM coverage for its naming and Markdown formatting. Its end-to-end
+  recover and delete behaviour is still untested on hardware.
+- Board evidence is confirmed to reach the note provider in **mock** mode. It has not been validated
+  against a real vision or note model.
+- The two device scenarios remain deterministic mock plumbing. They establish neither transcription,
+  diarization, note, OCR, equation nor diagram accuracy, and they say nothing about long-session
+  reliability.

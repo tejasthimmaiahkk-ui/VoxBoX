@@ -1,7 +1,7 @@
 # VoxBox Test Plan
 
 Status: continuous multimodal MVP plan and verified-evidence record
-Last updated: 2026-08-03
+Last updated: 2026-08-04
 
 ## Verification and claims policy
 
@@ -17,16 +17,31 @@ The legacy bounded speech/manual Board results remain valid for those exact code
 
 ## Current verification status
 
-- Android JVM unit suite: **70 tests, 0 failures/errors/skips across 23 suites**.
+Updated 2026-08-04.
+
+- Android JVM unit suite: **82 tests, 0 failures/errors/skips across 27 suites** (was 70 across 23).
 - Android production `compileDebugKotlin`: **passed**, including Room/KSP production compilation.
-- Backend Node suite: **11/11 passed** with mock/fake providers and no live or billable request.
-- Opt-in Android 16 mock-device Voice test: **passed standalone in 9.561 seconds**.
-- Opt-in Android 16 mock-device Video test: **passed standalone in 32.742 seconds** after the timed-capture defect was fixed.
+- Backend Node suite: **16/16 passed** with mock/fake providers and no live or billable request (was 11/11).
+- Opt-in Android 16 mock-device Voice test: **passed standalone in 11.136 seconds** on 2026-08-04 against the redesigned UI (device `5dfb3db8`, model 2411DRN47I, Android 16).
+- Opt-in Android 16 mock-device Video test: **passed standalone in 32.339 seconds** on 2026-08-04 against the redesigned UI.
 - Final `lintDebug`, `assembleDebug` and `assembleDebugAndroidTest`: **BUILD SUCCESSFUL**; lint has 0 errors and 18 warnings.
-- Final `app-debug.apk`: **61,182,613 bytes**, SHA-256 `DABF116DB614D0066AD3AC867C2D77BB7E344154C8B6FCAE7A563FD12CCCA0AB`.
+- Final `app-debug.apk`: **61,182,613 bytes**, SHA-256 `85190FA5E46A6017BE52FD68C82C792F4DBCB8F9B862E2A412F8C73B72F884E8`.
 - Secret scan: **clear**; only `server/.env.example` is present as an environment template. `git diff --check`: **exit 0**.
-- Real rotated-key provider test: **not run**.
+- Real rotated-key provider test: **not run**. The account was rejected at generation time with an upstream `429`.
+- End-to-end confirmation that board evidence reaches the note provider: **passed on device 2026-08-04** in mock mode. The Video note reached three `## Board evidence` sections, which the proxy emits only when the request actually carries a `boardEvidence` object.
 - YouTube trial and all continuous-flow accuracy metrics: **not run**.
+
+### Device run procedure note
+
+`connectedDebugAndroidTest` fails on this device with `INSTALL_FAILED_USER_RESTRICTED: Install canceled by user`, because HyperOS blocks the split install-session commit that Gradle's ddmlib installer uses. A plain streamed `adb install -r` is not blocked. Run the opt-in scenarios directly instead:
+
+```bash
+adb -s 5dfb3db8 install -r VoxBox/app/build/outputs/apk/debug/app-debug.apk
+adb -s 5dfb3db8 install -r VoxBox/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+adb -s 5dfb3db8 shell am instrument -w -e voxboxLiveSmoke true -e class 'me.thimmaiah.voxbox.LiveCaptureDeviceSmokeTest#voiceDrainsFinalPartialChunk' me.thimmaiah.voxbox.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+The mock proxy must be running (`MOCK_AI=1 node server.mjs`) with `adb reverse tcp:8787 tcp:8787` active. Run each scenario standalone so a failure in one pipeline cannot hide the other result.
 
 ## 1. Automated test layers
 
@@ -112,8 +127,34 @@ Pure crop bounds and file behavior have focused tests. Complete lifecycle timing
 - Reused patch id with different Markdown is rejected.
 - Correction severity and evidence-id lists validate.
 - Unknown/invalid source and oversized response are rejected.
+- **Request serialization** (added 2026-08-04): a frame-only request keeps its `boardEvidence` object in the body, and an audio-only request still sends an explicit `null`. This pins the defect where `JsonObjectBuilder.put`'s previous-value return made an elvis fallback overwrite real board evidence with `null`, which silently removed board evidence from every request and caused the proxy to reject frame-only updates.
 
-The bounded-context builder, Android response parser/materializer and proxy contract have focused automated coverage. The exact live ViewModel-to-proxy-to-Room sequence still requires the mock/device integration run in Section 2.
+The bounded-context builder, Android response parser/materializer, **request serializer** and proxy contract have focused automated coverage. The exact live ViewModel-to-proxy-to-Room sequence still requires the mock/device integration run in Section 2.
+
+### 1.6a Provider-failure classification (added 2026-08-04)
+
+Backend, against fake upstream responses:
+
+- Upstream `429` with `insufficient_quota` is preserved as proxy `429`, coded `<kind>_quota_exhausted`, `retryable: false`, and carries the upstream `x-request-id`.
+- Any other upstream `429` is preserved as `<kind>_rate_limited`, `retryable: true`, with `retryAfterSeconds` taken from `Retry-After` or the rate-limit reset headers.
+- Upstream `401` yields `<kind>_auth_error`, `retryable: false`, and the response body never contains the configured key.
+- Vision and note endpoints classify identically; upstream `5xx` stays retryable.
+- A non-JSON provider error body still classifies from status and headers, and its contents never appear in the proxy response.
+
+Android:
+
+- The shared envelope parses into a typed failure with kind, `retryable`, retry-after seconds and provider request id.
+- An unparseable body is retryable only for server-side statuses, so a rejected request is never replayed.
+- A transport failure is retryable.
+- The transcription retry loop stops on a non-retryable failure instead of using all three attempts.
+
+### 1.6b Retained-audio recovery (added 2026-08-04)
+
+- A retained WAV file name round-trips its chunk id, session offset and duration.
+- A file written before the naming change still parses, and its duration is derived from the WAV header.
+- Recovery appends a labelled `## Recovered audio` section and preserves the existing note content verbatim above it.
+
+The recover/delete controls themselves, and the recovery path against a real session, still require device coverage in Section 2.
 
 ### 1.7 Room v2 and repositories
 
@@ -161,8 +202,12 @@ Pending: add `room-testing` and a migration test that creates a v1 database with
 - Manual speaker override controls current-chunk Runnable prioritization and expires at the next chunk.
 - Export share intent uses `FileProvider` and ZIP MIME type.
 - State recreation/interruption behavior.
+- Retained WAV files are listed from disk with their offset, duration and size, and each can be recovered or deleted.
+- A typed provider-failure banner appears for quota, rate-limit, credential and availability failures.
 
-Instrumentation now covers the exact short final-partial Voice path and one timed CameraX-plus-audio Video path through saved-note state. Permission denial, Back/leave, process death, retries, multiple cadences, relaunch/export and long-session behavior still require device coverage.
+Instrumentation covers the exact short final-partial Voice path and one timed CameraX-plus-audio Video path through saved-note state. Permission denial, Back/leave, process death, retries, multiple cadences, relaunch/export and long-session behavior still require device coverage.
+
+**Both instrumentation scenarios were re-run on 2026-08-04 against the redesigned UI and passed** (Voice 11.136 s, Video 32.339 s). The redesign preserved every string and content description the tests match on, and deliberately keeps exactly one scrollable node per capture screen because `scrollToMatcher` resolves it with `onNode(hasScrollAction())`; chip groups therefore wrap with `FlowRow` rather than scrolling. Any further UI work must keep both constraints.
 
 ### 1.11 Backend contract/security
 

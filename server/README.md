@@ -72,8 +72,29 @@ Requests and responses use `Cache-Control: no-store`. Submitted media and text a
 - The complete JSON body limit is 14 MiB.
 - Unknown top-level request fields are rejected.
 - Media is raw Base64 without a `data:` URL prefix; decoded size and file signatures are checked before any provider call.
-- Error responses use `{ "error": { "code": "string", "message": "string" } }`.
-- Expected error statuses include `400`, `409`, `413`, `415`, `502`, and `503`; unknown routes return `404`.
+- Error responses use `{ "error": { "code": "string", "message": "string", "retryable": boolean } }`.
+- Expected error statuses include `400`, `409`, `413`, `415`, `429`, `502`, and `503`; unknown routes return `404`.
+
+### Provider failure classification
+
+An upstream failure is no longer collapsed into a single `502`. The proxy reads a bounded provider
+error body plus the response headers and reports:
+
+| Upstream | `code` | Proxy status | `retryable` |
+| --- | --- | --- | --- |
+| `429` with `insufficient_quota` | `<kind>_quota_exhausted` | `429` | `false` |
+| `429` otherwise | `<kind>_rate_limited` | `429` | `true` |
+| `401` or `403` | `<kind>_auth_error` | `502` | `false` |
+| other `4xx` | `<kind>_request_rejected` | `502` | `false` |
+| `5xx` or unreadable | `<kind>_provider_error` | `502` | `true` |
+
+`<kind>` is `transcription`, `vision`, or `note`. Classified failures also carry a `provider` object
+with the upstream `status`, `type`, `code`, truncated `message`, `requestId` (`x-request-id`),
+`retryAfterSeconds` (from `Retry-After` or the rate-limit reset headers) and the remaining
+request/token counters.
+
+The proxy logs only that classification. It never logs or forwards request bodies, media, or the
+configured API key, and it truncates the provider body to 8 KiB before parsing.
 
 ## `GET /health`
 

@@ -1,6 +1,6 @@
 # VoxBox continuation handoff — continuous multimodal MVP
 
-Status date: 2026-08-03
+Status date: 2026-08-04 (see the 2026-08-04 sections at the end for the current resume point)
 
 Resume from the existing dirty working tree. Do not reset, discard or overwrite the verified legacy work. The continuous multimodal implementation has automated/unit/contract evidence plus two passing Android 16 mock-device instrumentation slices. It still has no real-provider, accuracy-corpus, endurance or YouTube validation.
 
@@ -154,10 +154,104 @@ User action required first:
 
 Recommended next implementation work:
 
-1. Safely parse provider error JSON and retain `error.type`, `error.code`, upstream `x-request-id`, `Retry-After`, and rate-limit headers without logging request bodies or credentials.
-2. Preserve upstream `429` instead of collapsing it to proxy `502`, and distinguish `insufficient_quota` from transient rate limiting in Android UI/retry policy.
-3. Avoid retrying permanent quota errors; retain each WAV once and show a direct billing/rate-limit message.
-4. Add user-facing actions to retry or delete retained WAV files.
+1. ~~Safely parse provider error JSON and retain `error.type`, `error.code`, upstream `x-request-id`, `Retry-After`, and rate-limit headers without logging request bodies or credentials.~~ **Done 2026-08-04.**
+2. ~~Preserve upstream `429` instead of collapsing it to proxy `502`, and distinguish `insufficient_quota` from transient rate limiting in Android UI/retry policy.~~ **Done 2026-08-04.**
+3. ~~Avoid retrying permanent quota errors; retain each WAV once and show a direct billing/rate-limit message.~~ **Done 2026-08-04.**
+4. ~~Add user-facing actions to retry or delete retained WAV files.~~ **Done 2026-08-04 (implementation and JVM tests; not yet exercised on hardware).**
 5. After quota is available, run one short Voice chunk first, then one Video frame plus audio. Inspect provider source markers before attempting a longer YouTube lesson.
 
 Local diagnostic copies were created only under `%TEMP%\voxbox-live-api-diagnostic`; the canonical retained WAV files remain private in the app's internal storage.
+
+## 2026-08-04 increment — board-evidence fix, failure classification, retained-audio controls, UI redesign
+
+Full detail is in `PROJECT_LOG.md` under the same date. Summary of what changed and what it means for
+the pending gates:
+
+### The second issue from the diagnosis above is solved and did not need quota
+
+`HttpNoteRefinementClient.toJson()` used `boardEvidence?.let { put(...) } ?: put("boardEvidence", JsonNull)`.
+`JsonObjectBuilder.put` returns the **previous** value for a key, which is `null` for a new key, so the
+elvis branch always ran and replaced real board evidence with `null`. A frame-only update has no
+transcript segments, so the proxy rejected it with
+`At least one transcript segment or boardEvidence item is required` and Android used the local
+fallback. Board evidence had therefore never reached the note provider in any build. The builder now
+branches explicitly and `NoteRefinementRequestJsonTest` pins both directions of the contract.
+
+### Provider failures are now typed end to end
+
+The proxy preserves upstream `429`, separates `insufficient_quota` from transient rate limiting, marks
+each error `retryable`, and attaches upstream `type`/`code`/`x-request-id`/`Retry-After`/rate-limit
+counters without logging bodies or the key. Android parses that envelope into `VoxBoxServiceFailure`,
+stops retrying non-retryable failures, and shows a typed banner with the matching remedy.
+
+### Retained WAVs are user-manageable
+
+Each retained recovery WAV lists on the Live setup screen with its offset, duration and size, and can
+be recovered or deleted. Recovery re-transcribes it, persists the diarized segments as evidence and
+appends a labelled `## Recovered audio` section to the original note through the revision-guarded path.
+It intentionally does not re-run AI refinement, because the note has moved on and a delta cannot be
+validated against it.
+
+The twelve retained WAVs named above (four from Voice session `d73f6175-78a3-4d48-bca9-078b6412fffd`,
+eight from Video session `e5736cff-f1fb-4dd5-b172-f2a91aadd846`) are still on the device. Once quota is
+restored they can be recovered from inside the app instead of being deleted manually. Files written
+before this change have no offset in their name; they list with an offset of `00:00` and a duration
+derived from the WAV header, which is cosmetic only.
+
+### UI/UX redesign
+
+New `ui/VoxBoxIcons.kt` (self-contained `ImageVector` outline set, because Material 3 1.4 no longer
+ships `material-icons-core`) and a much larger `ui/VoxBoxDesign.kt` design system. All three screens
+were rebuilt around it. Two constraints that must be respected by any further UI work:
+
+- **Keep exactly one scrollable node per capture screen.** `LiveCaptureDeviceSmokeTest.scrollToMatcher`
+  resolves it with `onNode(hasScrollAction())`, which fails if a second scroll container exists. Chip
+  groups therefore wrap with `FlowRow` instead of scrolling horizontally.
+- **Keep the test anchor strings.** `One session, one living note`, `New note title`, `Live board`,
+  `Continuous audio`, `Camera + continuous audio`, `Stop and finish note`, `SAVED`,
+  `Start continuous voice session`, `Start continuous video session`, the `Notes`/`Live`/`Board`
+  navigation content descriptions, and the board `Live board camera preview`, `Capture board frame`,
+  `Save board capture as note` descriptions. `Live board` and `Continuous audio` must each match
+  exactly one node on their screen, because the test uses `onNodeWithText`.
+
+### Verification for this increment
+
+- Android JVM: 82 tests across 27 suites, 0 failures/errors/skips.
+- `lintDebug`, `assembleDebug`, `assembleDebugAndroidTest`: BUILD SUCCESSFUL; lint 0 errors, 18 warnings
+  (all dependency-version/target-API advisories).
+- `app-debug.apk`: 61,182,613 bytes, SHA-256 `85190FA5E46A6017BE52FD68C82C792F4DBCB8F9B862E2A412F8C73B72F884E8`.
+- Backend `node --test`: 16/16 passed with mocks and fakes only; no live or billable request.
+- **Android 16 device `5dfb3db8` (2411DRN47I), mock proxy:** `voiceDrainsFinalPartialChunk` passed in
+  11.136 s and `videoCapturesBoardAndAudio` passed in 32.339 s, both against the redesigned UI.
+  Screenshots are in `evidence/redesign-2026-08-04/`.
+- **Board evidence confirmed end to end on device (mock mode):** the Video note reached three
+  `## Board evidence` sections, which the proxy emits only when the request actually carries a
+  `boardEvidence` object.
+- Secret scan clear; `git diff --check` exits 0.
+
+### Device test procedure on this handset
+
+`connectedDebugAndroidTest` does **not** work here: HyperOS rejects the split install-session commit
+that Gradle's ddmlib installer uses, with `INSTALL_FAILED_USER_RESTRICTED: Install canceled by user`.
+A plain streamed `adb install -r` is not blocked. Drive the opt-in scenarios directly instead:
+
+```bash
+adb -s 5dfb3db8 install -r VoxBox/app/build/outputs/apk/debug/app-debug.apk
+adb -s 5dfb3db8 install -r VoxBox/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+adb -s 5dfb3db8 shell am instrument -w -e voxboxLiveSmoke true -e class 'me.thimmaiah.voxbox.LiveCaptureDeviceSmokeTest#voiceDrainsFinalPartialChunk' me.thimmaiah.voxbox.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+Start the mock proxy first (`cd server && MOCK_AI=1 node server.mjs`) and run
+`adb reverse tcp:8787 tcp:8787`. Run each scenario standalone so one pipeline cannot mask the other.
+
+### Next actions, in order
+
+1. Restore provider quota, then run one short Voice chunk and one Video frame plus audio, recording the
+   exact model and source markers, latency and cost. This is now the only thing blocking real-provider
+   validation.
+2. Recover the twelve retained WAVs through the new in-app control rather than deleting them, which
+   also gives the retained-audio controls their first hardware exercise.
+3. Verify the v1→v2 Room migration on the Redmi target.
+4. Expand device coverage to Back/leave, force-stop/relaunch, export, proxy outage, permission denial
+   and additional frame cadences.
+5. Then continue with the corpus, endurance and YouTube work, which remain untouched.

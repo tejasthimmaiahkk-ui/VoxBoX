@@ -1,6 +1,6 @@
 # VoxBox Viva Notes
 
-Last updated: 2026-08-03
+Last updated: 2026-08-04
 
 ## One-sentence answer
 
@@ -180,12 +180,51 @@ No accuracy percentage exists yet.
 
 These results verify deterministic mock plumbing, not real transcription, AI, OCR or diagram accuracy.
 
+### 2026-08-04 increment
+
+- The board-evidence serialization defect is fixed and covered by request-contract tests.
+- Provider failures are classified end to end; retries that cannot succeed are skipped.
+- Retained WAVs can be recovered or deleted from the app.
+- The interface was rebuilt on a design system with its own icon set.
+- Android JVM: 80 tests across 26 suites, 0 failures. Backend: 16/16. Lint: 0 errors, 18 warnings.
+
 ### Not yet verified/evaluated
 
+- Both mock-device scenarios re-run against the redesigned interface.
+- End-to-end confirmation that board evidence now reaches the note provider.
 - Real-device Room v1→v2 migration.
 - Any rotated-key OpenAI request or model accuracy/latency/cost.
 - Noisy-room and competing-speaker evaluation.
 - Multiple-cadence frame/crop corpus, YouTube tests and long-session resource results.
+- Hardware verification of the new retained-WAV recovery and deletion controls.
+
+## Did you find any real defect by testing, and how?
+
+Two, and both are worth stating plainly.
+
+The first was found on the device. Live board opened the CameraX preview but never captured a frame: the Compose coroutine used for periodic capture never invoked `takePicture` on the tested runtime. Capture scheduling now uses a main-loop `Handler` owned by the camera `DisposableEffect`. The passing Video run is from the corrected path.
+
+The second was found by reading the request contract on 2026-08-04. The note-refinement client built its JSON with `boardEvidence?.let { put(...) } ?: put("boardEvidence", JsonNull)`. In kotlinx.serialization, `JsonObjectBuilder.put` returns the **previous** value for that key, which is `null` for a new key, so the elvis branch always ran and replaced real board evidence with `null`. Because a frame-only update carries no transcript segments, the proxy correctly rejected the request with "At least one transcript segment or boardEvidence item is required" and the app fell back to unrefined local evidence. Board evidence had therefore never reached the note provider in any build. The existing suite only tested response parsing, which is exactly why the defect was invisible; there are now request-serialization tests for both the frame-only and audio-only directions.
+
+## What happens now when the AI provider refuses the request?
+
+The proxy classifies the failure instead of collapsing everything into one gateway error. It reads a bounded provider error body and the response headers, preserves an upstream `429`, and separates an exhausted account quota from a transient rate limit. Every error carries a `retryable` flag plus the upstream status, type, code, request id and retry-after seconds. It never logs or forwards request bodies, media or the key.
+
+Android acts on that. A non-retryable failure such as an exhausted quota or a rejected credential stops the retry loop immediately rather than burning two more attempts and retaining more audio, the note warning records whether retries were attempted, and the live screen shows the specific remedy.
+
+## If transcription fails, is the speech lost?
+
+No. Each completed chunk is written to app-private recovery storage before processing, and the WAV is deleted only after both its transcript evidence and the note revision commit. If either fails the file stays, and a warning is written into the note.
+
+Those files are now manageable from inside the app. The Live setup screen lists every retained WAV with its session offset, duration, size and the reason it was kept, and each one can be recovered or deleted. Recovery re-transcribes it, persists the diarized segments as evidence, and appends a labelled "Recovered audio" section to the original note through the same revision-guarded path. It deliberately does not re-run AI refinement: the note has moved on since the failure, so a delta could not be validated against it, and captured speech must not be quietly reinterpreted. Deleting is explicit and says the audio evidence is gone.
+
+## Why does the interface look the way it does?
+
+The earlier build encoded selection as a "✓" prefix inside a button label, which meant a screen reader announced the tick as part of the text, and it stacked full-width outlined buttons for every folder, note and syllabus, so the setup screen was several screens of near-identical controls.
+
+The current build has a small design system: tone-mapped status pills, section cards with numbered headers, radio-style selectable rows, chips for folders and syllabi, stat tiles for the live counters, and banners that carry a problem and its remedy together. Selection state now lives in semantics rather than in the label text. Icons are a self-contained set drawn as vector path data, because Material 3 1.4 no longer ships an icon dependency and the extended artifact would add a large amount of unused drawable data to an already 61 MB debug APK.
+
+One constraint is worth knowing: the device smoke test resolves the scrollable list with a matcher that requires exactly one scrollable node per screen, so chip groups wrap rather than scroll horizontally.
 
 ## Why is the project still feasible?
 

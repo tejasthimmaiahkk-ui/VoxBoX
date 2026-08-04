@@ -449,3 +449,121 @@ test("delta requests require bounded context and bounded syllabus excerpts", asy
   }));
   assert.equal(tooManyExcerpts.status, 400);
 });
+
+function audioRequest(overrides = {}) {
+  return {
+    audioBase64: tinyWav().toString("base64"),
+    mimeType: "audio/wav",
+    sessionId: "session-quota",
+    chunkId: "chunk-1",
+    offsetMs: 0,
+    ...overrides,
+  };
+}
+
+function providerError(status, body, headers = {}) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json", ...headers },
+  });
+}
+
+test("an exhausted provider quota is preserved as 429 and marked non-retryable", async () => {
+  const base = await start({
+    env: { OPENAI_API_KEY: "audio-secret" },
+    fetchImpl: async () => providerError(
+      429,
+      { error: { message: "You exceeded your current quota.", type: "insufficient_quota", code: "insufficient_quota" } },
+      { "x-request-id": "req_quota_1" },
+    ),
+  });
+
+  const response = await post(base, "/v1/audio/transcribe", audioRequest());
+  assert.equal(response.status, 429);
+  const payload = (await response.json()).error;
+  assert.equal(payload.code, "transcription_quota_exhausted");
+  assert.equal(payload.retryable, false);
+  assert.equal(payload.provider.status, 429);
+  assert.equal(payload.provider.type, "insufficient_quota");
+  assert.equal(payload.provider.requestId, "req_quota_1");
+});
+
+test("a transient rate limit stays retryable and reports its retry delay", async () => {
+  const base = await start({
+    env: { OPENAI_API_KEY: "audio-secret" },
+    fetchImpl: async () => providerError(
+      429,
+      { error: { message: "Rate limit reached.", type: "rate_limit_error", code: "rate_limit_exceeded" } },
+      { "retry-after": "12", "x-ratelimit-remaining-requests": "0" },
+    ),
+  });
+
+  const response = await post(base, "/v1/audio/transcribe", audioRequest());
+  assert.equal(response.status, 429);
+  const payload = (await response.json()).error;
+  assert.equal(payload.code, "transcription_rate_limited");
+  assert.equal(payload.retryable, true);
+  assert.equal(payload.provider.retryAfterSeconds, 12);
+  assert.equal(payload.provider.remainingRequests, "0");
+  assert.match(payload.message, /12 second/);
+});
+
+test("a rejected server credential is non-retryable and never echoes the key", async () => {
+  const base = await start({
+    env: { OPENAI_API_KEY: "audio-secret" },
+    fetchImpl: async () => providerError(401, {
+      error: { message: "Incorrect API key provided.", type: "invalid_request_error", code: "invalid_api_key" },
+    }),
+  });
+
+  const response = await post(base, "/v1/audio/transcribe", audioRequest());
+  assert.equal(response.status, 502);
+  const body = await response.text();
+  assert.equal(JSON.parse(body).error.code, "transcription_auth_error");
+  assert.equal(JSON.parse(body).error.retryable, false);
+  assert.ok(!body.includes("audio-secret"));
+});
+
+test("vision and note provider failures use the same classification", async () => {
+  const visionBase = await start({
+    env: { OPENAI_API_KEY: "vision-secret" },
+    fetchImpl: async () => providerError(429, {
+      error: { message: "quota", type: "insufficient_quota", code: "insufficient_quota" },
+    }),
+  });
+  const vision = await post(visionBase, "/v1/board/extract", {
+    imageBase64: jpeg.toString("base64"),
+    mimeType: "image/jpeg",
+  });
+  assert.equal(vision.status, 429);
+  assert.equal((await vision.json()).error.code, "vision_quota_exhausted");
+
+  const noteBase = await start({
+    env: { OPENAI_API_KEY: "note-secret" },
+    fetchImpl: async () => providerError(500, { error: { message: "server error", type: "server_error" } }),
+  });
+  const note = await post(noteBase, "/v1/notes/refine", noteRequest({ requestId: "provider-500" }));
+  assert.equal(note.status, 502);
+  const notePayload = (await note.json()).error;
+  assert.equal(notePayload.code, "note_provider_error");
+  assert.equal(notePayload.retryable, true);
+});
+
+test("a non-JSON provider error body still classifies without leaking its contents", async () => {
+  const base = await start({
+    env: { OPENAI_API_KEY: "audio-secret" },
+    fetchImpl: async () => new Response("<html>Gateway timeout</html>", {
+      status: 504,
+      headers: { "content-type": "text/html" },
+    }),
+  });
+
+  const response = await post(base, "/v1/audio/transcribe", audioRequest());
+  assert.equal(response.status, 502);
+  const body = await response.text();
+  const payload = JSON.parse(body).error;
+  assert.equal(payload.code, "transcription_provider_error");
+  assert.equal(payload.retryable, true);
+  assert.equal(payload.provider.status, 504);
+  assert.ok(!body.includes("<html>"));
+});

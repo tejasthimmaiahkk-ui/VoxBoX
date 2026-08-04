@@ -11,6 +11,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
@@ -24,8 +25,10 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import me.thimmaiah.voxbox.audio.AudioTranscription
 import me.thimmaiah.voxbox.audio.AudioTranscriptionClient
+import me.thimmaiah.voxbox.audio.AudioTranscriptionException
 import me.thimmaiah.voxbox.audio.HttpAudioTranscriptionClient
 import me.thimmaiah.voxbox.audio.PerChunkSpeakerTracker
 import me.thimmaiah.voxbox.audio.PcmAudioChunkRecorder
@@ -44,6 +47,7 @@ import me.thimmaiah.voxbox.notes.NoteDatabase
 import me.thimmaiah.voxbox.notes.NoteEntity
 import me.thimmaiah.voxbox.notes.NoteBlockEntity
 import me.thimmaiah.voxbox.notes.NoteBlockType
+import me.thimmaiah.voxbox.network.VoxBoxServiceFailure
 import me.thimmaiah.voxbox.notes.RoomLibraryStructureRepository
 import me.thimmaiah.voxbox.notes.RoomNoteRepository
 import me.thimmaiah.voxbox.notes.SyllabusEntity
@@ -63,6 +67,23 @@ data class LiveTranscriptLine(
     val startMs: Long,
     val text: String,
     val primary: Boolean,
+)
+
+/**
+ * A privately retained recovery WAV whose transcript never committed.
+ *
+ * The file stays in app-private storage until the user retries or deletes it, so speech is never
+ * silently discarded when the provider is unavailable.
+ */
+data class RetainedAudioChunk(
+    val id: String,
+    val sessionId: String,
+    val offsetMs: Long,
+    val durationMs: Long,
+    val sizeBytes: Long,
+    val path: String,
+    val reason: String,
+    val retrying: Boolean = false,
 )
 
 data class CaptureSessionUiState(
@@ -93,6 +114,8 @@ data class CaptureSessionUiState(
         reason = "Speaker labels are evaluated independently inside each audio chunk.",
     ),
     val latestChunkSpeakerIds: List<String> = emptyList(),
+    val serviceFailure: VoxBoxServiceFailure? = null,
+    val retainedAudio: List<RetainedAudioChunk> = emptyList(),
     val pendingEvents: Int = 0,
     val pendingAudioChunks: Int = 0,
     val pendingFrames: Int = 0,
@@ -535,9 +558,18 @@ class CaptureSessionViewModel(
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
+            val failure = (error as? AudioTranscriptionException)?.failure
+            recordServiceFailure(failure)
+            val attempts = if (failure?.retryable == false) {
+                "without a retry because the service reported a permanent failure"
+            } else {
+                "after retries"
+            }
+            val cause = failure?.describe() ?: error.message.orEmpty()
             retainAudioWithWarning(
                 chunk,
-                "Audio at ${formatTimestamp(chunk.offsetMs)} could not be transcribed after retries; " +
+                "Audio at ${formatTimestamp(chunk.offsetMs)} could not be transcribed $attempts" +
+                    (if (cause.isBlank()) "" else " ($cause)") + "; " +
                     if (chunk.recoveryFile?.isFile == true) "its WAV is retained locally." else "local WAV retention failed.",
             )
             return
@@ -839,10 +871,10 @@ class CaptureSessionViewModel(
     private fun audioRecoveryRoot(): File =
         File(getApplication<Application>().filesDir, "unrecovered-audio")
 
-    private fun surfaceRetainedAudio() {
+    private fun retainedAudioFiles(): List<File> {
         val root = audioRecoveryRoot()
-        if (!root.isDirectory) return
-        val retained = runCatching {
+        if (!root.isDirectory) return emptyList()
+        return runCatching {
             root.listFiles().orEmpty()
                 .flatMap { entry ->
                     when {
@@ -851,17 +883,164 @@ class CaptureSessionViewModel(
                     }
                 }
                 .filter { file -> file.isFile && file.extension.equals("wav", ignoreCase = true) }
+                .sortedBy(File::lastModified)
         }.getOrDefault(emptyList())
+    }
+
+    /**
+     * Rebuilds the retained-audio list from disk so the user can review, retry, or delete each file.
+     *
+     * The session id comes from the containing folder and the chunk id/offset from the file name, so
+     * a file written before this build still lists with a derived duration.
+     */
+    private fun refreshRetainedAudio(): List<RetainedAudioChunk> {
+        val previous = _uiState.value.retainedAudio.associateBy(RetainedAudioChunk::path)
+        val retained = retainedAudioFiles().map { file ->
+            val descriptor = parseRetainedAudioName(file.name)
+            val sessionId = file.parentFile
+                ?.takeIf { it.name != audioRecoveryRoot().name }
+                ?.name
+                .orEmpty()
+            RetainedAudioChunk(
+                id = descriptor.chunkToken,
+                sessionId = sessionId,
+                offsetMs = descriptor.offsetMs ?: 0,
+                durationMs = descriptor.durationMs ?: wavDurationMs(file),
+                sizeBytes = file.length(),
+                path = file.absolutePath,
+                reason = previous[file.absolutePath]?.reason
+                    ?: "Its transcript never committed, so the audio is kept instead of discarded.",
+            )
+        }
+        retainedAudioIds.clear()
+        retainedAudioIds.addAll(retained.map(RetainedAudioChunk::id))
+        _uiState.update { it.copy(retainedAudio = retained, retainedAudioChunks = retained.size) }
+        return retained
+    }
+
+    private fun surfaceRetainedAudio() {
+        val retained = refreshRetainedAudio()
         if (retained.isEmpty()) return
-        retainedAudioIds.addAll(retained.map { file -> file.nameWithoutExtension })
         val warning = "${retained.size} unrecovered audio WAV file(s) from an earlier session remain private on this phone."
         _uiState.update {
             it.copy(
-                retainedAudioChunks = retained.size,
                 warnings = (it.warnings + warning).distinct(),
                 status = warning,
             )
         }
+    }
+
+    /**
+     * Re-runs transcription for one retained WAV and appends its evidence to the original note.
+     *
+     * Recovery deliberately appends a labelled verbatim section instead of re-running AI refinement:
+     * the note has moved on since the failure, so a delta cannot be validated against it, and the
+     * captured speech must not be silently reinterpreted.
+     */
+    fun retryRetainedAudio(id: String) {
+        if (_uiState.value.retainedAudio.any { it.id == id && it.retrying }) return
+        viewModelScope.launch {
+            updateRetainedAudio(id) { it.copy(retrying = true) }
+            val chunk = _uiState.value.retainedAudio.firstOrNull { it.id == id } ?: return@launch
+            val file = File(chunk.path)
+            try {
+                val session = sessionRepository.findSession(chunk.sessionId)
+                    ?: error("The original capture session no longer exists, so this audio can only be deleted.")
+                check(file.isFile) { "The retained WAV is no longer on this device." }
+                val wavBytes = withContext(Dispatchers.IO) { file.readBytes() }
+                val transcription = transcriptionClient.transcribe(
+                    sessionId = session.id,
+                    chunkId = "recovered-${chunk.id}",
+                    offsetMs = chunk.offsetMs,
+                    wavBytes = wavBytes,
+                )
+                if (transcription.segments.isEmpty()) {
+                    file.delete()
+                    refreshRetainedAudio()
+                    appendWarning("Recovered audio at ${formatTimestamp(chunk.offsetMs)} contained no clear speech; the WAV was removed.")
+                    return@launch
+                }
+                val evidence = transcription.segments.map { segment ->
+                    val persisted = sessionRepository.appendTranscript(
+                        session.id,
+                        NewTranscriptSegment(
+                            text = segment.text,
+                            startMs = segment.startMs,
+                            endMs = segment.endMs,
+                            speakerId = segment.speakerId,
+                        ),
+                    )
+                    TranscriptEvidence(
+                        id = persisted.id,
+                        speakerId = persisted.speakerId,
+                        startMs = persisted.startMs,
+                        endMs = persisted.endMs,
+                        text = persisted.text,
+                        isPrimarySpeaker = false,
+                    )
+                }
+                val current = sessionRepository.generatedMarkdown(session.id).orEmpty()
+                val recovered = appendRecoveredEvidence(current, chunk.offsetMs, evidence)
+                val update = sessionRepository.applyGeneratedMarkdown(
+                    sessionId = session.id,
+                    patchId = "recovered-audio-${chunk.id}",
+                    expectedRevision = session.revision,
+                    markdown = recovered,
+                )
+                check(
+                    update is GeneratedMarkdownUpdateResult.Apply ||
+                        update is GeneratedMarkdownUpdateResult.Duplicate,
+                ) { "The recovered transcript could not be saved into the note." }
+                file.delete()
+                file.parentFile?.takeIf { it.listFiles().isNullOrEmpty() }?.delete()
+                refreshRetainedAudio()
+                if (_uiState.value.activeSession?.id == session.id) {
+                    _uiState.update { it.copy(revision = update.revision, generatedMarkdown = recovered) }
+                }
+                _uiState.update {
+                    it.copy(status = "Recovered ${evidence.size} segment(s) from the audio at ${formatTimestamp(chunk.offsetMs)}.")
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                recordServiceFailure((error as? AudioTranscriptionException)?.failure)
+                updateRetainedAudio(id) {
+                    it.copy(retrying = false, reason = error.message ?: "The retry failed; the WAV is still retained.")
+                }
+                appendWarning("Retained audio recovery failed: ${error.message}")
+                return@launch
+            }
+        }
+    }
+
+    /** Permanently removes one retained WAV after the user chooses to discard that evidence. */
+    fun deleteRetainedAudio(id: String) {
+        val chunk = _uiState.value.retainedAudio.firstOrNull { it.id == id } ?: return
+        viewModelScope.launch {
+            val file = File(chunk.path)
+            file.delete()
+            file.parentFile?.takeIf { it.listFiles().isNullOrEmpty() }?.delete()
+            refreshRetainedAudio()
+            appendWarning(
+                "A retained WAV covering ${formatTimestamp(chunk.offsetMs)} was deleted at your request; " +
+                    "that audio evidence is gone.",
+            )
+        }
+    }
+
+    private fun updateRetainedAudio(id: String, transform: (RetainedAudioChunk) -> RetainedAudioChunk) {
+        _uiState.update { state ->
+            state.copy(
+                retainedAudio = state.retainedAudio.map { chunk ->
+                    if (chunk.id == id) transform(chunk) else chunk
+                },
+            )
+        }
+    }
+
+    private fun recordServiceFailure(failure: VoxBoxServiceFailure?) {
+        if (failure == null) return
+        _uiState.update { it.copy(serviceFailure = failure) }
     }
 
     private fun storeRecoverableAudio(chunk: RecordedAudioChunk): QueuedAudioChunk {
@@ -870,7 +1049,10 @@ class CaptureSessionViewModel(
         var temporary: File? = null
         return try {
             if (!directory.exists() && !directory.mkdirs()) error("Recovery audio folder could not be created.")
-            val target = File(directory, "${safeFileToken(chunk.id)}.wav")
+            val target = File(
+                directory,
+                retainedAudioFileName(chunk.id, chunk.offsetMs, chunk.durationMs),
+            )
             temporary = File(directory, ".${safeFileToken(chunk.id)}.tmp")
             FileOutputStream(temporary).use { output ->
                 output.write(chunk.wavBytes)
@@ -929,6 +1111,11 @@ class CaptureSessionViewModel(
                 )
             } catch (error: CancellationException) {
                 throw error
+            } catch (error: AudioTranscriptionException) {
+                lastFailure = error
+                // An exhausted quota, a rejected credential or a rejected request cannot succeed on
+                // a second attempt. Retrying would only delay the warning and retain more audio.
+                if (!error.retryable) throw error
             } catch (error: Exception) {
                 lastFailure = error
             }
@@ -939,8 +1126,9 @@ class CaptureSessionViewModel(
     private suspend fun retainAudioWithWarning(chunk: QueuedAudioChunk, message: String) {
         val retained = chunk.recoveryFile?.isFile == true
         val finalMessage = if (retained) message else "$message No durable WAV file was available."
-        if (retained && retainedAudioIds.add(chunk.id)) {
-            _uiState.update { it.copy(retainedAudioChunks = it.retainedAudioChunks + 1) }
+        if (retained) {
+            refreshRetainedAudio()
+            updateRetainedAudio(safeFileToken(chunk.id)) { it.copy(reason = finalMessage) }
         }
         persistOperationalWarning(finalMessage)
     }
@@ -948,9 +1136,7 @@ class CaptureSessionViewModel(
     private fun deleteRecoveredAudio(chunk: QueuedAudioChunk) {
         chunk.recoveryFile?.delete()
         chunk.recoveryFile?.parentFile?.takeIf { it.listFiles().isNullOrEmpty() }?.delete()
-        if (retainedAudioIds.remove(chunk.id)) {
-            _uiState.update { it.copy(retainedAudioChunks = (it.retainedAudioChunks - 1).coerceAtLeast(0)) }
-        }
+        if (retainedAudioIds.contains(safeFileToken(chunk.id))) refreshRetainedAudio()
     }
 
     private fun decrementAudioPending() {
@@ -1073,6 +1259,54 @@ internal val TRANSCRIPTION_RETRY_DELAYS_MS = listOf(750L, 2_000L)
 
 private const val REVIEW_START_MARKER = "<!-- voxbox-review:start -->"
 private const val REVIEW_END_MARKER = "<!-- voxbox-review:end -->"
+
+/** Recovery WAV names carry their session offset so a retained file stays reviewable after a relaunch. */
+private val RETAINED_AUDIO_NAME = Regex("^(.*)-o(\\d{1,15})-d(\\d{1,15})$")
+
+internal data class RetainedAudioDescriptor(
+    val chunkToken: String,
+    val offsetMs: Long?,
+    val durationMs: Long?,
+)
+
+internal fun retainedAudioFileName(chunkId: String, offsetMs: Long, durationMs: Long): String =
+    "${safeFileToken(chunkId)}-o${offsetMs.coerceAtLeast(0)}-d${durationMs.coerceAtLeast(0)}.wav"
+
+internal fun parseRetainedAudioName(fileName: String): RetainedAudioDescriptor {
+    val stem = fileName.removeSuffix(".wav").removeSuffix(".WAV")
+    val match = RETAINED_AUDIO_NAME.matchEntire(stem)
+        ?: return RetainedAudioDescriptor(chunkToken = stem, offsetMs = null, durationMs = null)
+    return RetainedAudioDescriptor(
+        chunkToken = match.groupValues[1],
+        offsetMs = match.groupValues[2].toLongOrNull(),
+        durationMs = match.groupValues[3].toLongOrNull(),
+    )
+}
+
+/** Derives a duration for files written before the name carried one. */
+internal fun wavDurationMs(file: File): Long {
+    val bytes = (file.length() - 44).coerceAtLeast(0)
+    // Capture is fixed at 16 kHz mono PCM16, so one second is 32,000 bytes.
+    return bytes * 1_000 / 32_000
+}
+
+internal fun appendRecoveredEvidence(
+    existing: String,
+    offsetMs: Long,
+    transcript: List<TranscriptEvidence>,
+): String {
+    val additions = buildList {
+        add("## Recovered audio · ${formatTimestamp(offsetMs)}")
+        add("> Transcribed later from a retained recording. It was not part of the live structured note.")
+        transcript.forEach { segment ->
+            val speaker = segment.speakerId?.let { " · $it" }.orEmpty()
+            add("- **${formatTimestamp(segment.startMs)}$speaker:** ${segment.text.trim()}")
+        }
+    }
+    return listOf(existing.trim(), additions.joinToString("\n"))
+        .filter(String::isNotBlank)
+        .joinToString("\n\n")
+}
 
 internal fun safeFileToken(value: String): String {
     val sanitized = value.trim()

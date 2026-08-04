@@ -15,6 +15,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -22,14 +23,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -59,6 +61,14 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import java.io.File
 import java.util.Locale
+import me.thimmaiah.voxbox.ui.VoxBoxBanner
+import me.thimmaiah.voxbox.ui.VoxBoxIcons
+import me.thimmaiah.voxbox.ui.VoxBoxLayout
+import me.thimmaiah.voxbox.ui.VoxBoxSectionCard
+import me.thimmaiah.voxbox.ui.VoxBoxSectionHeader
+import me.thimmaiah.voxbox.ui.VoxBoxSpacing
+import me.thimmaiah.voxbox.ui.VoxBoxStatusPill
+import me.thimmaiah.voxbox.ui.VoxBoxStatusTone
 
 private const val PREVIEW_DESCRIPTION = "Live board camera preview"
 private const val CAPTURE_LABEL = "Capture board frame"
@@ -139,19 +149,13 @@ fun BoardCaptureScreen(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(scrollState)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+            .padding(
+                horizontal = VoxBoxLayout.compactScreenPadding,
+                vertical = VoxBoxSpacing.small,
+            ),
+        verticalArrangement = Arrangement.spacedBy(VoxBoxLayout.sectionSpacing),
     ) {
-        Text(
-            text = "Board capture",
-            style = MaterialTheme.typography.headlineMedium,
-        )
-        Text(
-            text = "The camera stays live on this screen, but only the still frame you capture is analyzed. A configured AI service is tried first; if unavailable, OCR runs on your device. Review every field before saving.",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        StatusCard(uiState)
+        StatusHeader(uiState)
 
         when {
             !permissionGranted -> PermissionCard(
@@ -179,45 +183,108 @@ fun BoardCaptureScreen(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 uiState.errorMessage?.let { errorMessage ->
-                    Text(
-                        text = errorMessage,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodyMedium,
+                    VoxBoxBanner(
+                        title = "The last frame failed",
+                        message = errorMessage,
+                        tone = VoxBoxStatusTone.Error,
                     )
                 }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    if (uiState.stage == BoardCaptureStage.ERROR) {
-                        OutlinedButton(
-                            onClick = viewModel::retake,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text(RETAKE_LABEL)
-                        }
-                    } else {
-                        Button(
-                            onClick = {
-                                captureBoardFrame(
-                                    context = context,
-                                    controller = cameraController,
-                                    viewModel = viewModel,
-                                )
-                            },
-                            enabled = uiState.canCapture,
-                            modifier = Modifier
-                                .weight(1f)
-                                .semantics { contentDescription = CAPTURE_LABEL },
-                        ) {
-                            Text(CAPTURE_LABEL)
-                        }
+                if (uiState.stage == BoardCaptureStage.ERROR) {
+                    OutlinedButton(
+                        onClick = viewModel::retake,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .semantics { contentDescription = RETAKE_LABEL },
+                    ) {
+                        Text(RETAKE_LABEL)
                     }
+                } else {
+                    ShutterButton(
+                        enabled = uiState.canCapture,
+                        onClick = {
+                            captureBoardFrame(
+                                context = context,
+                                controller = cameraController,
+                                viewModel = viewModel,
+                            )
+                        },
+                    )
                 }
                 CaptureGuidance()
             }
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(VoxBoxSpacing.small))
+    }
+}
+
+/**
+ * Large circular shutter under the preview.
+ *
+ * The capture label stays on the accessibility node so assistive technology and the device test
+ * keep addressing this control by name even though the button itself is now iconographic.
+ */
+@Composable
+private fun ShutterButton(
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        Button(
+            onClick = onClick,
+            enabled = enabled,
+            shape = CircleShape,
+            contentPadding = PaddingValues(0.dp),
+            modifier = Modifier
+                .size(76.dp)
+                .semantics { contentDescription = CAPTURE_LABEL },
+        ) {
+            Icon(
+                imageVector = VoxBoxIcons.Camera,
+                contentDescription = null,
+                modifier = Modifier.size(30.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun StatusHeader(state: BoardCaptureUiState) {
+    Column(
+        modifier = Modifier.padding(
+            start = VoxBoxSpacing.xSmall,
+            end = VoxBoxSpacing.xSmall,
+            top = VoxBoxSpacing.xSmall,
+        ),
+        verticalArrangement = Arrangement.spacedBy(VoxBoxSpacing.small),
+    ) {
+        VoxBoxStatusPill(
+            label = when (state.stage) {
+                BoardCaptureStage.ERROR -> "NEEDS ATTENTION"
+                BoardCaptureStage.REVIEW -> "REVIEW BEFORE SAVING"
+                BoardCaptureStage.SAVED -> "SAVED"
+                BoardCaptureStage.PROCESSING -> "READING FRAME"
+                BoardCaptureStage.CAPTURING -> "CAPTURING"
+                else -> "READY"
+            },
+            tone = when (state.stage) {
+                BoardCaptureStage.ERROR -> VoxBoxStatusTone.Error
+                BoardCaptureStage.REVIEW -> VoxBoxStatusTone.Warning
+                BoardCaptureStage.SAVED -> VoxBoxStatusTone.Success
+                else -> VoxBoxStatusTone.Accent
+            },
+            pulsing = state.stage == BoardCaptureStage.PROCESSING ||
+                state.stage == BoardCaptureStage.CAPTURING,
+        )
+        Text(state.status, style = MaterialTheme.typography.bodyMedium)
+        Text(
+            text = "Only the still frame you capture is analyzed. A configured AI service is tried " +
+                "first; bundled on-device OCR is the fallback.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -226,7 +293,7 @@ private fun CameraPreview(
     cameraController: LifecycleCameraController,
     modifier: Modifier = Modifier,
 ) {
-    val shape = RoundedCornerShape(24.dp)
+    val shape = MaterialTheme.shapes.large
     Box(
         modifier = modifier
             .aspectRatio(4f / 3f)
@@ -259,11 +326,11 @@ private fun CameraPreview(
                 .align(Alignment.TopCenter)
                 .padding(top = 30.dp),
             shape = RoundedCornerShape(50),
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.86f),
         ) {
             Text(
                 text = "Keep all writing inside the frame",
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                modifier = Modifier.padding(horizontal = VoxBoxSpacing.medium, vertical = 6.dp),
                 style = MaterialTheme.typography.labelMedium,
             )
         }
@@ -272,65 +339,40 @@ private fun CameraPreview(
 
 @Composable
 private fun PermissionCard(onRequestPermission: () -> Unit) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text("Camera access is needed", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "VoxBox does not stream video. Only the frame you capture may be sent to the configured AI service; the temporary phone file is deleted after extraction.",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            Button(onClick = onRequestPermission) {
-                Text("Allow camera access")
-            }
+    VoxBoxSectionCard(Modifier.fillMaxWidth(), tone = VoxBoxStatusTone.Accent) {
+        VoxBoxSectionHeader(
+            title = "Camera access is needed",
+            supportingText = "Nothing is streamed or recorded",
+        )
+        Text(
+            text = "Only the frame you capture may be sent to the configured AI service. " +
+                "The temporary phone file is deleted after extraction.",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Button(onClick = onRequestPermission, modifier = Modifier.fillMaxWidth()) {
+            Text("Allow camera access")
         }
     }
 }
 
 @Composable
-private fun StatusCard(state: BoardCaptureUiState) {
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = when (state.stage) {
-            BoardCaptureStage.ERROR -> MaterialTheme.colorScheme.errorContainer
-            BoardCaptureStage.REVIEW -> MaterialTheme.colorScheme.tertiaryContainer
-            BoardCaptureStage.SAVED -> MaterialTheme.colorScheme.secondaryContainer
-            else -> MaterialTheme.colorScheme.primaryContainer
-        },
-    ) {
-        Text(
-            text = state.status,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            style = MaterialTheme.typography.labelLarge,
-        )
-    }
-}
-
-@Composable
 private fun ProcessingCard() {
-    Card {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+    VoxBoxSectionCard(Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(VoxBoxSpacing.large),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            CircularProgressIndicator()
-            Text("Reading the captured frame…", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "The captured still is being sent to the configured AI service when available; bundled on-device OCR is the fallback.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodyMedium,
-            )
+            CircularProgressIndicator(modifier = Modifier.size(28.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Reading the captured frame…", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    text = "The still is sent to the configured AI service when available; " +
+                        "bundled on-device OCR is the fallback.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
@@ -343,99 +385,110 @@ private fun ReviewCard(
     onSave: () -> Unit,
 ) {
     val draft = state.draft ?: return
-    Card {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Text("Review extraction", style = MaterialTheme.typography.titleLarge)
+    VoxBoxSectionCard(Modifier.fillMaxWidth()) {
+        VoxBoxSectionHeader(
+            title = "Review extraction",
+            supportingText = "Nothing is saved until you confirm",
+            trailing = {
+                VoxBoxStatusPill(
+                    label = when (draft.source) {
+                        BoardExtractionSource.REMOTE_VISION -> "VISION"
+                        BoardExtractionSource.MOCK_PROXY -> "MOCK"
+                        BoardExtractionSource.OFFLINE_OCR -> "OFFLINE OCR"
+                    },
+                    tone = when (draft.source) {
+                        BoardExtractionSource.REMOTE_VISION -> VoxBoxStatusTone.Success
+                        else -> VoxBoxStatusTone.Warning
+                    },
+                )
+            },
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(VoxBoxSpacing.xSmall)) {
             Text(
-                "Nothing is saved until you confirm below. Correct unclear text and add missing concepts.",
+                text = when (draft.source) {
+                    BoardExtractionSource.REMOTE_VISION -> "Vision extraction"
+                    BoardExtractionSource.MOCK_PROXY -> "Mock response — image not analyzed"
+                    BoardExtractionSource.OFFLINE_OCR -> "Offline OCR fallback"
+                },
+                style = MaterialTheme.typography.labelLarge,
+            )
+            Text(
+                text = if (draft.source != BoardExtractionSource.REMOTE_VISION) {
+                    "Confidence not reported"
+                } else {
+                    "${String.format(Locale.US, "%.0f", draft.confidence * 100)}% confidence"
+                },
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.labelMedium,
             )
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Text(
-                    text = when (draft.source) {
-                        BoardExtractionSource.REMOTE_VISION -> "Vision extraction"
-                        BoardExtractionSource.MOCK_PROXY -> "Mock response — image not analyzed"
-                        BoardExtractionSource.OFFLINE_OCR -> "Offline OCR fallback"
-                    },
-                    style = MaterialTheme.typography.labelLarge,
-                )
-                Text(
-                    text = if (draft.source != BoardExtractionSource.REMOTE_VISION) {
-                        "Confidence not reported"
-                    } else {
-                        "${String.format(Locale.US, "%.0f", draft.confidence * 100)}% confidence"
-                    },
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.labelMedium,
-                )
-            }
-            OutlinedTextField(
-                value = draft.title,
-                onValueChange = viewModel::updateTitle,
-                label = { Text("Note title") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            OutlinedTextField(
-                value = draft.summary,
-                onValueChange = viewModel::updateSummary,
-                label = { Text("Summary") },
-                minLines = 3,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            OutlinedTextField(
-                value = draft.conceptsText,
-                onValueChange = viewModel::updateConcepts,
-                label = { Text("Concepts (one per line)") },
-                minLines = 3,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            OutlinedTextField(
-                value = draft.visibleText,
-                onValueChange = viewModel::updateVisibleText,
-                label = { Text("Visible board text") },
-                minLines = 5,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            if (draft.warnings.isNotEmpty()) {
-                HorizontalDivider()
-                Text("Check before saving", style = MaterialTheme.typography.titleSmall)
-                draft.warnings.forEach { warning ->
+        }
+        OutlinedTextField(
+            value = draft.title,
+            onValueChange = viewModel::updateTitle,
+            label = { Text("Note title") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = draft.summary,
+            onValueChange = viewModel::updateSummary,
+            label = { Text("Summary") },
+            minLines = 3,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = draft.conceptsText,
+            onValueChange = viewModel::updateConcepts,
+            label = { Text("Concepts (one per line)") },
+            minLines = 3,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = draft.visibleText,
+            onValueChange = viewModel::updateVisibleText,
+            label = { Text("Visible board text") },
+            minLines = 5,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (draft.warnings.isNotEmpty()) {
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Text("Check before saving", style = MaterialTheme.typography.titleSmall)
+            draft.warnings.forEach { warning ->
+                Row(horizontalArrangement = Arrangement.spacedBy(VoxBoxSpacing.small)) {
+                    Icon(
+                        imageVector = VoxBoxIcons.Info,
+                        contentDescription = null,
+                        modifier = Modifier.size(15.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     Text(
-                        text = "• $warning",
+                        text = warning,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
             }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(VoxBoxSpacing.medium),
+        ) {
+            OutlinedButton(
+                onClick = onRetake,
+                modifier = Modifier
+                    .weight(1f)
+                    .semantics { contentDescription = RETAKE_LABEL },
             ) {
-                OutlinedButton(
-                    onClick = onRetake,
-                    modifier = Modifier
-                        .weight(1f)
-                        .semantics { contentDescription = RETAKE_LABEL },
-                ) {
-                    Text(RETAKE_LABEL)
-                }
-                Button(
-                    onClick = onSave,
-                    enabled = state.canSave,
-                    modifier = Modifier
-                        .weight(1f)
-                        .semantics { contentDescription = SAVE_LABEL },
-                ) {
-                    Text("Save note")
-                }
+                Text(RETAKE_LABEL)
+            }
+            Button(
+                onClick = onSave,
+                enabled = state.canSave,
+                modifier = Modifier
+                    .weight(1f)
+                    .semantics { contentDescription = SAVE_LABEL },
+            ) {
+                Text("Save note")
             }
         }
     }
@@ -443,19 +496,26 @@ private fun ReviewCard(
 
 @Composable
 private fun CaptureGuidance() {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Text("For a clearer result", style = MaterialTheme.typography.titleSmall)
-            Text("• Hold the phone steady and fill the frame.", style = MaterialTheme.typography.bodySmall)
-            Text("• Avoid glare and blocked writing.", style = MaterialTheme.typography.bodySmall)
-            Text("• Review equations and names before saving.", style = MaterialTheme.typography.bodySmall)
+    VoxBoxSectionCard(Modifier.fillMaxWidth()) {
+        VoxBoxSectionHeader(title = "For a clearer result")
+        listOf(
+            "Hold the phone steady and fill the frame.",
+            "Avoid glare and blocked writing.",
+            "Review equations and names before saving.",
+        ).forEach { tip ->
+            Row(horizontalArrangement = Arrangement.spacedBy(VoxBoxSpacing.small)) {
+                Icon(
+                    imageVector = VoxBoxIcons.Check,
+                    contentDescription = null,
+                    modifier = Modifier.size(15.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    text = tip,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }

@@ -21,12 +21,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -48,11 +48,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -74,17 +72,16 @@ import me.thimmaiah.voxbox.notes.NoteLibraryUiState
 import me.thimmaiah.voxbox.notes.NoteLibraryViewModel
 import me.thimmaiah.voxbox.notes.ReadOnlyNoteBlock
 import me.thimmaiah.voxbox.notes.toReadOnlyBlockOrNull
-import me.thimmaiah.voxbox.speech.VoiceCaptureUiState
-import me.thimmaiah.voxbox.voxscript.VoxScriptResult
 import me.thimmaiah.voxbox.session.CaptureSessionScreen
 
 private enum class VoxBoxDestination(
     val label: String,
     val supportingText: String,
+    val icon: ImageVector,
 ) {
-    Notes("Notes", "Your saved study library"),
-    Speak("Live", "Continuous voice or camera notes"),
-    Board("Board", "Capture a board or projector"),
+    Notes("Notes", "Your saved study library", VoxBoxIcons.Notes),
+    Speak("Live", "Continuous voice or camera notes", VoxBoxIcons.Microphone),
+    Board("Board", "Capture a board or projector", VoxBoxIcons.Board),
 }
 
 @Composable
@@ -103,34 +100,46 @@ fun VoxBoxScreen() {
         }
     }
 
-    BackHandler(enabled = destination == VoxBoxDestination.Notes && noteDetailVisible) {
+    val showingNoteDetail = destination == VoxBoxDestination.Notes && noteDetailVisible
+    val leaveNoteDetail = {
         noteDetailVisible = false
         if (noteState.editDraft != null) {
             noteLibraryViewModel.cancelEditing()
         }
     }
+    val createNote = {
+        previousActiveNoteId = noteState.activeNoteId
+        awaitingCreatedNote = true
+        noteLibraryViewModel.updateSearchQuery("")
+        noteLibraryViewModel.createNote()
+    }
+
+    BackHandler(enabled = showingNoteDetail) { leaveNoteDetail() }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             VoxBoxTopBar(
                 destination = destination,
-                showingNoteDetail = destination == VoxBoxDestination.Notes && noteDetailVisible,
-                onBackFromNote = {
-                    noteDetailVisible = false
-                    if (noteState.editDraft != null) {
-                        noteLibraryViewModel.cancelEditing()
-                    }
-                },
+                showingNoteDetail = showingNoteDetail,
+                onBackFromNote = leaveNoteDetail,
             )
         },
         bottomBar = {
             VoxBoxNavigationBar(
                 selected = destination,
-                onSelect = { selected ->
-                    destination = selected
-                },
+                onSelect = { selected -> destination = selected },
             )
+        },
+        floatingActionButton = {
+            if (destination == VoxBoxDestination.Notes && !noteDetailVisible) {
+                ExtendedFloatingActionButton(
+                    onClick = createNote,
+                    modifier = Modifier.semantics { contentDescription = "Create a new note" },
+                    icon = { Icon(VoxBoxIcons.Add, contentDescription = null) },
+                    text = { Text("New note") },
+                )
+            }
         },
     ) { innerPadding ->
         Box(
@@ -163,12 +172,7 @@ fun VoxBoxScreen() {
                             modifier = pageModifier,
                             onSearchQueryChange = noteLibraryViewModel::updateSearchQuery,
                             onSelectFolder = noteLibraryViewModel::selectFolder,
-                            onCreateNote = {
-                                previousActiveNoteId = noteState.activeNoteId
-                                awaitingCreatedNote = true
-                                noteLibraryViewModel.updateSearchQuery("")
-                                noteLibraryViewModel.createNote()
-                            },
+                            onCreateNote = createNote,
                             onOpenNote = { noteId ->
                                 noteLibraryViewModel.updateSearchQuery("")
                                 noteLibraryViewModel.openNote(noteId)
@@ -239,24 +243,25 @@ private fun VoxBoxTopBar(
         },
         navigationIcon = {
             if (showingNoteDetail) {
-                IconButton(
-                    onClick = onBackFromNote,
-                    modifier = Modifier.semantics { contentDescription = "Back to notes" },
-                ) {
-                    Text("←", style = MaterialTheme.typography.headlineSmall)
+                IconButton(onClick = onBackFromNote) {
+                    Icon(VoxBoxIcons.Back, contentDescription = "Back to notes")
                 }
             } else {
                 Surface(
                     modifier = Modifier
                         .padding(start = VoxBoxSpacing.medium)
-                        .size(40.dp)
+                        .size(38.dp)
                         .semantics { contentDescription = "VoxBox" },
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    shape = RoundedCornerShape(13.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    shape = RoundedCornerShape(12.dp),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Text("V", style = MaterialTheme.typography.titleLarge)
+                        Text(
+                            text = "V",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
                     }
                 }
             }
@@ -282,105 +287,12 @@ private fun VoxBoxNavigationBar(
             NavigationBarItem(
                 selected = selected == destination,
                 onClick = { onSelect(destination) },
-                icon = {
-                    DestinationIcon(
-                        destination = destination,
-                        selected = selected == destination,
-                    )
-                },
+                icon = { Icon(destination.icon, contentDescription = null) },
                 label = { Text(destination.label) },
                 modifier = Modifier.semantics {
                     contentDescription = destination.label
                 },
             )
-        }
-    }
-}
-
-@Composable
-private fun DestinationIcon(
-    destination: VoxBoxDestination,
-    selected: Boolean,
-) {
-    val color = if (selected) {
-        MaterialTheme.colorScheme.onSecondaryContainer
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    Canvas(Modifier.size(24.dp)) {
-        val stroke = Stroke(width = 1.8.dp.toPx())
-        val lineWidth = 1.6.dp.toPx()
-        when (destination) {
-            VoxBoxDestination.Notes -> {
-                drawRoundRect(
-                    color = color,
-                    topLeft = Offset(4.dp.toPx(), 2.dp.toPx()),
-                    size = Size(16.dp.toPx(), 20.dp.toPx()),
-                    cornerRadius = CornerRadius(2.dp.toPx()),
-                    style = stroke,
-                )
-                listOf(8.dp, 12.dp, 16.dp).forEach { y ->
-                    drawLine(
-                        color = color,
-                        start = Offset(7.dp.toPx(), y.toPx()),
-                        end = Offset(17.dp.toPx(), y.toPx()),
-                        strokeWidth = lineWidth,
-                    )
-                }
-            }
-
-            VoxBoxDestination.Speak -> {
-                drawRoundRect(
-                    color = color,
-                    topLeft = Offset(8.dp.toPx(), 2.dp.toPx()),
-                    size = Size(8.dp.toPx(), 13.dp.toPx()),
-                    cornerRadius = CornerRadius(4.dp.toPx()),
-                    style = stroke,
-                )
-                drawArc(
-                    color = color,
-                    startAngle = 0f,
-                    sweepAngle = 180f,
-                    useCenter = false,
-                    topLeft = Offset(5.dp.toPx(), 7.dp.toPx()),
-                    size = Size(14.dp.toPx(), 11.dp.toPx()),
-                    style = stroke,
-                )
-                drawLine(
-                    color = color,
-                    start = Offset(12.dp.toPx(), 18.dp.toPx()),
-                    end = Offset(12.dp.toPx(), 22.dp.toPx()),
-                    strokeWidth = lineWidth,
-                )
-                drawLine(
-                    color = color,
-                    start = Offset(8.dp.toPx(), 22.dp.toPx()),
-                    end = Offset(16.dp.toPx(), 22.dp.toPx()),
-                    strokeWidth = lineWidth,
-                )
-            }
-
-            VoxBoxDestination.Board -> {
-                drawRoundRect(
-                    color = color,
-                    topLeft = Offset(2.dp.toPx(), 3.dp.toPx()),
-                    size = Size(20.dp.toPx(), 15.dp.toPx()),
-                    cornerRadius = CornerRadius(2.dp.toPx()),
-                    style = stroke,
-                )
-                drawLine(
-                    color = color,
-                    start = Offset(12.dp.toPx(), 18.dp.toPx()),
-                    end = Offset(12.dp.toPx(), 22.dp.toPx()),
-                    strokeWidth = lineWidth,
-                )
-                drawLine(
-                    color = color,
-                    start = Offset(7.dp.toPx(), 22.dp.toPx()),
-                    end = Offset(17.dp.toPx(), 22.dp.toPx()),
-                    strokeWidth = lineWidth,
-                )
-            }
         }
     }
 }
@@ -398,117 +310,102 @@ private fun NoteLibraryScreen(
         modifier = modifier,
         contentPadding = PaddingValues(
             start = VoxBoxLayout.compactScreenPadding,
-            top = VoxBoxSpacing.medium,
+            top = VoxBoxSpacing.small,
             end = VoxBoxLayout.compactScreenPadding,
-            bottom = VoxBoxSpacing.xLarge,
+            bottom = 96.dp,
         ),
         verticalArrangement = Arrangement.spacedBy(VoxBoxSpacing.medium),
     ) {
-        item("library-summary") {
-            VoxBoxSectionCard(Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(VoxBoxSpacing.medium),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            text = "Study library",
-                            style = MaterialTheme.typography.headlineSmall,
-                            modifier = Modifier.semantics { heading() },
-                        )
-                        Text(
-                            text = if (state.searchQuery.isBlank()) {
-                                "${state.totalNoteCount} saved " +
-                                    if (state.totalNoteCount == 1) "note" else "notes"
-                            } else {
-                                "${state.visibleNotes.size} " +
-                                    (if (state.visibleNotes.size == 1) "match" else "matches") +
-                                    " in ${state.totalNoteCount} " +
-                                    (if (state.totalNoteCount == 1) "note" else "notes")
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Button(
-                        onClick = onCreateNote,
-                        modifier = Modifier.semantics {
-                            contentDescription = "Create a new note"
-                        },
-                    ) {
-                        Text("New note")
-                    }
-                }
-                LibraryStatus(state.status)
-                OutlinedTextField(
-                    value = state.searchQuery,
-                    onValueChange = onSearchQueryChange,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .semantics {
-                            contentDescription = "Search saved notes"
-                        },
-                    label = { Text("Search notes") },
-                    placeholder = { Text("Title or saved content") },
-                    trailingIcon = {
-                        if (state.searchQuery.isNotEmpty()) {
-                            IconButton(
-                                onClick = { onSearchQueryChange("") },
-                                modifier = Modifier.semantics {
-                                    contentDescription = "Clear note search"
-                                },
-                            ) {
-                                Text("×", style = MaterialTheme.typography.titleLarge)
-                            }
+        item("library-search") {
+            OutlinedTextField(
+                value = state.searchQuery,
+                onValueChange = onSearchQueryChange,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics { contentDescription = "Search saved notes" },
+                placeholder = { Text("Search titles and saved content") },
+                leadingIcon = { Icon(VoxBoxIcons.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (state.searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { onSearchQueryChange("") }) {
+                            Icon(VoxBoxIcons.Close, contentDescription = "Clear note search")
                         }
-                    },
-                    singleLine = true,
-                )
-                if (state.folders.isNotEmpty()) {
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    Text("Folders", style = MaterialTheme.typography.labelLarge)
-                    OutlinedButton(
+                    }
+                },
+                shape = MaterialTheme.shapes.extraLarge,
+                singleLine = true,
+            )
+        }
+
+        if (state.folders.isNotEmpty()) {
+            item("library-folders") {
+                VoxBoxChipGroup {
+                    VoxBoxChip(
+                        label = "All notes",
+                        selected = state.selectedFolderId == null,
                         onClick = { onSelectFolder(null) },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(if (state.selectedFolderId == null) "✓ All notes" else "All notes")
-                    }
-                    state.folders.take(5).forEach { folder ->
-                        OutlinedButton(
+                        icon = VoxBoxIcons.Notes,
+                    )
+                    state.folders.take(8).forEach { folder ->
+                        VoxBoxChip(
+                            label = folder.name,
+                            selected = state.selectedFolderId == folder.id,
                             onClick = { onSelectFolder(folder.id) },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(if (state.selectedFolderId == folder.id) "✓ ${folder.name}" else folder.name)
-                        }
+                            icon = VoxBoxIcons.Folder,
+                        )
                     }
                 }
             }
         }
 
+        item("library-summary") {
+            Text(
+                text = libraryCountLabel(state),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = VoxBoxSpacing.xSmall),
+            )
+        }
+
         if (state.totalNoteCount == 0) {
             item("empty-library") {
-                EmptyNoteLibrary(onCreateNote)
+                VoxBoxEmptyState(
+                    icon = VoxBoxIcons.Notes,
+                    title = "Nothing saved yet",
+                    message = "Record a live session, capture a board, or start an empty note. " +
+                        "Everything stays on this phone.",
+                    action = {
+                        FilledTonalButton(onClick = onCreateNote) {
+                            Text("Create first note")
+                        }
+                    },
+                )
             }
         } else if (state.visibleNotes.isEmpty() && state.selectedFolderId != null) {
             item("empty-folder") {
-                VoxBoxSectionCard(Modifier.fillMaxWidth()) {
-                    VoxBoxStatusPill(label = "EMPTY FOLDER", tone = VoxBoxStatusTone.Warning)
-                    Text("No notes in this folder yet.", style = MaterialTheme.typography.titleLarge)
-                    Text(
-                        "Choose this folder when starting a live session, or return to all notes.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    OutlinedButton(onClick = { onSelectFolder(null) }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Show all notes")
-                    }
-                }
+                VoxBoxEmptyState(
+                    icon = VoxBoxIcons.Folder,
+                    title = "This folder is empty",
+                    message = "Choose this folder when you start a live session, or return to all notes.",
+                    action = {
+                        OutlinedButton(onClick = { onSelectFolder(null) }) {
+                            Text("Show all notes")
+                        }
+                    },
+                )
             }
         } else if (state.visibleNotes.isEmpty()) {
             item("no-search-results") {
-                NoSearchResults(
-                    query = state.searchQuery,
-                    onClearSearch = { onSearchQueryChange("") },
+                VoxBoxEmptyState(
+                    icon = VoxBoxIcons.Search,
+                    title = "No matches",
+                    message = "Nothing matched “${state.searchQuery}”. Try a title, concept, " +
+                        "or phrase from a saved note.",
+                    action = {
+                        OutlinedButton(onClick = { onSearchQueryChange("") }) {
+                            Text("Clear search")
+                        }
+                    },
                 )
             }
         } else {
@@ -519,69 +416,29 @@ private fun NoteLibraryScreen(
                 NoteLibraryRow(note = note, onOpenNote = onOpenNote)
             }
         }
-    }
-}
 
-@Composable
-private fun NoSearchResults(
-    query: String,
-    onClearSearch: () -> Unit,
-) {
-    VoxBoxSectionCard(Modifier.fillMaxWidth()) {
-        VoxBoxStatusPill(label = "NO MATCHES", tone = VoxBoxStatusTone.Warning)
-        Text(
-            text = "Nothing matched “$query”.",
-            style = MaterialTheme.typography.titleLarge,
-        )
-        Text(
-            text = "Try a title, concept, or phrase from a saved note.",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        OutlinedButton(
-            onClick = onClearSearch,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Clear search")
+        if (state.status.isNotBlank()) {
+            item("library-status") {
+                Text(
+                    text = state.status,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = VoxBoxSpacing.xSmall),
+                )
+            }
         }
     }
 }
 
-@Composable
-private fun LibraryStatus(status: String) {
-    Surface(
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-        shape = MaterialTheme.shapes.medium,
-    ) {
-        Text(
-            text = status,
-            modifier = Modifier.padding(
-                horizontal = VoxBoxSpacing.medium,
-                vertical = VoxBoxSpacing.small,
-            ),
-            style = MaterialTheme.typography.bodySmall,
-        )
-    }
-}
-
-@Composable
-private fun EmptyNoteLibrary(onCreateNote: () -> Unit) {
-    VoxBoxSectionCard(Modifier.fillMaxWidth()) {
-        VoxBoxStatusPill(label = "READY FOR YOUR FIRST NOTE")
-        Text(
-            text = "Keep everything you capture in one place.",
-            style = MaterialTheme.typography.titleLarge,
-        )
-        Text(
-            text = "Create an empty note, dictate a structured block, or capture a board frame.",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        FilledTonalButton(
-            onClick = onCreateNote,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Create first note")
+private fun libraryCountLabel(state: NoteLibraryUiState): String {
+    val total = state.totalNoteCount
+    val totalLabel = "$total ${if (total == 1) "note" else "notes"}"
+    return when {
+        state.searchQuery.isNotBlank() -> {
+            val matches = state.visibleNotes.size
+            "${if (matches == 1) "1 match" else "$matches matches"} in $totalLabel"
         }
+        else -> totalLabel
     }
 }
 
@@ -594,26 +451,24 @@ private fun NoteLibraryRow(
         onClick = { onOpenNote(note.id) },
         modifier = Modifier
             .fillMaxWidth()
-            .semantics {
-                contentDescription = "Open note ${note.title}"
-            },
+            .semantics { contentDescription = "Open note ${note.title}" },
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         ),
-        shape = MaterialTheme.shapes.large,
+        shape = MaterialTheme.shapes.medium,
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(VoxBoxSpacing.large),
+                .padding(horizontal = 14.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(VoxBoxSpacing.medium),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Surface(
-                modifier = Modifier.size(44.dp),
-                color = MaterialTheme.colorScheme.tertiaryContainer,
-                contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier.size(40.dp),
+                color = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                shape = RoundedCornerShape(13.dp),
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Text(
@@ -625,7 +480,7 @@ private fun NoteLibraryRow(
             Column(Modifier.weight(1f)) {
                 Text(
                     text = note.title,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleSmall,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -635,10 +490,11 @@ private fun NoteLibraryRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Text(
-                text = "›",
-                style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.primary,
+            Icon(
+                imageVector = VoxBoxIcons.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp),
             )
         }
     }
@@ -682,54 +538,56 @@ private fun SavedNoteDetailScreen(
         modifier = modifier,
         contentPadding = PaddingValues(
             start = VoxBoxLayout.compactScreenPadding,
-            top = VoxBoxSpacing.medium,
+            top = VoxBoxSpacing.small,
             end = VoxBoxLayout.compactScreenPadding,
-            bottom = VoxBoxSpacing.xLarge,
+            bottom = VoxBoxLayout.listBottomPadding,
         ),
-        verticalArrangement = Arrangement.spacedBy(VoxBoxSpacing.medium),
+        verticalArrangement = Arrangement.spacedBy(VoxBoxLayout.sectionSpacing),
     ) {
         item("note-heading") {
             VoxBoxSectionCard(Modifier.fillMaxWidth()) {
-                VoxBoxStatusPill(
-                    label = "SAVED LOCALLY",
-                    tone = VoxBoxStatusTone.Success,
-                )
+                VoxBoxStatusPill(label = "SAVED LOCALLY", tone = VoxBoxStatusTone.Success)
                 Text(
                     text = activeNote?.title ?: "Preparing note…",
-                    style = MaterialTheme.typography.headlineMedium,
+                    style = MaterialTheme.typography.headlineSmall,
                     modifier = Modifier.semantics { heading() },
                 )
                 if (activeNote != null) {
                     Text(
-                        text = "Updated ${formatTimestamp(activeNote.updatedAt)}",
+                        text = "Updated ${formatTimestamp(activeNote.updatedAt)} · " +
+                            "${state.activeBlocks.size} block(s)",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Text(
-                    text = state.status,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Button(
+                FilledTonalButton(
                     onClick = onExport,
                     enabled = activeNote != null,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text("Export Markdown + diagrams")
+                    Icon(VoxBoxIcons.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Text(
+                        text = "Export Markdown + diagrams",
+                        modifier = Modifier.padding(start = VoxBoxSpacing.small),
+                    )
+                }
+                if (state.status.isNotBlank()) {
+                    Text(
+                        text = state.status,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }
 
         if (activeNote != null && state.activeBlocks.isEmpty()) {
             item("empty-note") {
-                VoxBoxSectionCard(Modifier.fillMaxWidth()) {
-                    Text("This note is empty.", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "Switch to Speak or Board to add study content.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                VoxBoxEmptyState(
+                    icon = VoxBoxIcons.Waveform,
+                    title = "This note is empty",
+                    message = "Open Live or Board to add captured study content to it.",
+                )
             }
         }
 
@@ -753,7 +611,7 @@ private fun SavedNoteDetailScreen(
             }
         }
 
-        if (activeNote != null) {
+        if (activeNote != null && state.activeBlocks.isNotEmpty()) {
             item("editing-help") {
                 Text(
                     text = "Text and pie-chart blocks can be edited. Delete and reorder controls are planned.",
@@ -782,13 +640,15 @@ private fun SavedBlockCard(
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
             )
-            OutlinedButton(
+            IconButton(
                 onClick = onEdit,
-                modifier = Modifier.semantics {
-                    contentDescription = "Edit block ${block.position + 1}"
-                },
+                modifier = Modifier.size(VoxBoxLayout.minimumTouchTarget),
             ) {
-                Text("Edit")
+                Icon(
+                    imageVector = VoxBoxIcons.Edit,
+                    contentDescription = "Edit block ${block.position + 1}",
+                    modifier = Modifier.size(19.dp),
+                )
             }
         }
         ReadOnlyBlock(block.toReadOnlyBlockOrNull(), block.position)
@@ -802,69 +662,54 @@ private fun BlockEditCard(
     onSave: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    Card(
+    VoxBoxSectionCard(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-        ),
-        shape = MaterialTheme.shapes.large,
+        tone = VoxBoxStatusTone.Accent,
     ) {
-        Column(
-            modifier = Modifier.padding(VoxBoxSpacing.large),
-            verticalArrangement = Arrangement.spacedBy(VoxBoxSpacing.medium),
-        ) {
-            Text("Edit saved block", style = MaterialTheme.typography.titleMedium)
-            if (draft.type == NoteBlockType.PIE_CHART.name) {
-                OutlinedTextField(
-                    value = draft.percentageText,
-                    onValueChange = { value -> onUpdateDraft { it.copy(percentageText = value) } },
-                    label = { Text("Percentage (0–100)") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                )
-                OutlinedTextField(
-                    value = draft.color,
-                    onValueChange = { value -> onUpdateDraft { it.copy(color = value) } },
-                    label = { Text("Color") },
-                    supportingText = {
-                        Text("red, orange, yellow, green, blue, purple, pink, black or white")
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                )
-                OutlinedTextField(
-                    value = draft.label,
-                    onValueChange = { value -> onUpdateDraft { it.copy(label = value) } },
-                    label = { Text("Label") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                )
-            } else {
-                OutlinedTextField(
-                    value = draft.content,
-                    onValueChange = { value -> onUpdateDraft { it.copy(content = value) } },
-                    label = { Text("Text") },
-                    modifier = Modifier.fillMaxWidth(),
-                    minLines = 3,
-                )
-            }
-            Row(
+        Text("Edit saved block", style = MaterialTheme.typography.titleMedium)
+        if (draft.type == NoteBlockType.PIE_CHART.name) {
+            OutlinedTextField(
+                value = draft.percentageText,
+                onValueChange = { value -> onUpdateDraft { it.copy(percentageText = value) } },
+                label = { Text("Percentage (0–100)") },
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(VoxBoxSpacing.small),
-            ) {
-                Button(
-                    onClick = onSave,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text("Save changes")
-                }
-                OutlinedButton(
-                    onClick = onCancel,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text("Cancel")
-                }
+                singleLine = true,
+            )
+            OutlinedTextField(
+                value = draft.color,
+                onValueChange = { value -> onUpdateDraft { it.copy(color = value) } },
+                label = { Text("Color") },
+                supportingText = {
+                    Text("red, orange, yellow, green, blue, purple, pink, black or white")
+                },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+            )
+            OutlinedTextField(
+                value = draft.label,
+                onValueChange = { value -> onUpdateDraft { it.copy(label = value) } },
+                label = { Text("Label") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+            )
+        } else {
+            OutlinedTextField(
+                value = draft.content,
+                onValueChange = { value -> onUpdateDraft { it.copy(content = value) } },
+                label = { Text("Text") },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 3,
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(VoxBoxSpacing.small),
+        ) {
+            Button(onClick = onSave, modifier = Modifier.weight(1f)) {
+                Text("Save changes")
+            }
+            OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) {
+                Text("Cancel")
             }
         }
     }
@@ -884,7 +729,7 @@ private fun ReadOnlyBlock(block: ReadOnlyNoteBlock?, position: Int) {
 
         is ReadOnlyNoteBlock.Heading -> Text(
             text = block.text,
-            style = MaterialTheme.typography.headlineSmall,
+            style = MaterialTheme.typography.titleLarge,
             modifier = Modifier.semantics { heading() },
         )
 
@@ -911,319 +756,6 @@ private fun ReadOnlyBlock(block: ReadOnlyNoteBlock?, position: Int) {
 }
 
 @Composable
-private fun SpeakScreen(
-    state: VoiceCaptureUiState,
-    modifier: Modifier = Modifier,
-    onPrimaryAction: () -> Unit,
-    onCancel: () -> Unit,
-    onSavePreview: (VoxScriptResult) -> Unit,
-    onLoadExample: () -> Unit,
-) {
-    LazyColumn(
-        modifier = modifier,
-        contentPadding = PaddingValues(
-            start = VoxBoxLayout.compactScreenPadding,
-            top = VoxBoxSpacing.medium,
-            end = VoxBoxLayout.compactScreenPadding,
-            bottom = VoxBoxSpacing.xLarge,
-        ),
-        verticalArrangement = Arrangement.spacedBy(VoxBoxSpacing.medium),
-    ) {
-        item("capture") {
-            CaptureCard(
-                state = state,
-                onPrimaryAction = onPrimaryAction,
-                onCancel = onCancel,
-            )
-        }
-        item("speech-status") {
-            PermissionAndRecognizerCard(state)
-        }
-        item("transcript") {
-            TranscriptCard(state)
-        }
-        state.structuredResult?.let { result ->
-            item("structured-preview") {
-                StructuredPreview(result)
-            }
-            item("save-preview") {
-                Button(
-                    onClick = { onSavePreview(result) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .semantics {
-                            contentDescription = "Save structured preview to notes"
-                        },
-                    enabled = result !is VoxScriptResult.InvalidCommand,
-                ) {
-                    Text("Save to notes")
-                }
-            }
-        }
-        item("example") {
-            OutlinedButton(
-                onClick = onLoadExample,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("Try the 25% wheat chart example")
-            }
-        }
-        item("privacy-note") {
-            Text(
-                text = "Speech uses the Android recognizer shown above. Board AI is handled separately.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(
-                    start = VoxBoxSpacing.xSmall,
-                    end = VoxBoxSpacing.xSmall,
-                    bottom = VoxBoxSpacing.small,
-                ),
-            )
-        }
-    }
-}
-
-@Composable
-private fun PermissionAndRecognizerCard(state: VoiceCaptureUiState) {
-    VoxBoxSectionCard(Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(VoxBoxSpacing.medium),
-            verticalAlignment = Alignment.Top,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("Speech engine", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    text = when {
-                        !state.recognitionAvailable -> {
-                            "No Android speech-recognition service was detected."
-                        }
-
-                        state.usesOnDeviceRecognizer -> "Android on-device recognizer selected."
-                        else -> "Android system recognizer selected; it may use a network service."
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            VoxBoxStatusPill(
-                label = when {
-                    !state.recognitionAvailable -> "UNAVAILABLE"
-                    state.usesOnDeviceRecognizer -> "ON-DEVICE"
-                    else -> "SYSTEM"
-                },
-                tone = when {
-                    !state.recognitionAvailable -> VoxBoxStatusTone.Error
-                    state.usesOnDeviceRecognizer -> VoxBoxStatusTone.Success
-                    else -> VoxBoxStatusTone.Accent
-                },
-            )
-        }
-    }
-}
-
-@Composable
-private fun CaptureCard(
-    state: VoiceCaptureUiState,
-    onPrimaryAction: () -> Unit,
-    onCancel: () -> Unit,
-) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-        ),
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.extraLarge,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(VoxBoxSpacing.xLarge),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(VoxBoxSpacing.medium),
-        ) {
-            VoxBoxStatusPill(
-                label = when {
-                    state.isListening -> "LISTENING"
-                    !state.permissionGranted -> "PERMISSION NEEDED"
-                    else -> "READY"
-                },
-                tone = when {
-                    state.isListening -> VoxBoxStatusTone.Warning
-                    !state.permissionGranted -> VoxBoxStatusTone.Warning
-                    else -> VoxBoxStatusTone.Success
-                },
-            )
-            Button(
-                onClick = onPrimaryAction,
-                enabled = state.recognitionAvailable || !state.permissionGranted,
-                modifier = Modifier
-                    .size(104.dp)
-                    .semantics {
-                        contentDescription = when {
-                            !state.permissionGranted -> "Grant microphone permission"
-                            state.isListening -> "Stop listening"
-                            else -> "Start listening"
-                        }
-                    },
-                shape = CircleShape,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (state.isListening) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.primary
-                    },
-                    contentColor = if (state.isListening) {
-                        MaterialTheme.colorScheme.onError
-                    } else {
-                        MaterialTheme.colorScheme.onPrimary
-                    },
-                ),
-            ) {
-                Text(
-                    text = when {
-                        !state.permissionGranted -> "ALLOW"
-                        state.isListening -> "STOP"
-                        else -> "MIC"
-                    },
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Black,
-                )
-            }
-            Text(
-                text = state.status,
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.semantics { contentDescription = "Speech status: ${state.status}" },
-            )
-            Text(
-                text = when {
-                    !state.permissionGranted -> "Tap to allow microphone access."
-                    state.isListening -> "Speak naturally, then tap STOP."
-                    else -> "Dictate a paragraph or speak a VoxScript command."
-                },
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
-            if (state.isListening) {
-                OutlinedButton(onClick = onCancel) {
-                    Text("Cancel session")
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun TranscriptCard(state: VoiceCaptureUiState) {
-    val visibleText = state.partialTranscript.ifBlank { state.finalTranscript }
-    VoxBoxSectionCard(Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "Transcript",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.semantics { heading() },
-            )
-            if (visibleText.isNotBlank()) {
-                VoxBoxStatusPill(
-                    label = if (state.isListening) "LIVE" else "CAPTURED",
-                    tone = if (state.isListening) {
-                        VoxBoxStatusTone.Warning
-                    } else {
-                        VoxBoxStatusTone.Success
-                    },
-                )
-            }
-        }
-        SelectionContainer {
-            Text(
-                text = visibleText.ifBlank { "Recognized speech will appear here." },
-                style = MaterialTheme.typography.bodyLarge,
-                color = if (visibleText.isBlank()) {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                } else {
-                    MaterialTheme.colorScheme.onSurface
-                },
-            )
-        }
-        state.error?.let { error ->
-            Surface(
-                color = MaterialTheme.colorScheme.errorContainer,
-                contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                shape = MaterialTheme.shapes.medium,
-            ) {
-                Text(
-                    text = error,
-                    modifier = Modifier.padding(VoxBoxSpacing.medium),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun StructuredPreview(result: VoxScriptResult) {
-    VoxBoxSectionCard(Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "Structured preview",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.semantics { heading() },
-            )
-            VoxBoxStatusPill(
-                label = if (result is VoxScriptResult.InvalidCommand) "CHECK" else "READY",
-                tone = if (result is VoxScriptResult.InvalidCommand) {
-                    VoxBoxStatusTone.Error
-                } else {
-                    VoxBoxStatusTone.Success
-                },
-            )
-        }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        when (result) {
-            is VoxScriptResult.PlainDictation -> {
-                Text("Paragraph", style = MaterialTheme.typography.labelMedium)
-                Text(result.sourceText, style = MaterialTheme.typography.bodyLarge)
-            }
-
-            is VoxScriptResult.Heading -> Text(
-                text = result.text,
-                style = MaterialTheme.typography.headlineSmall,
-                modifier = Modifier.semantics { heading() },
-            )
-
-            is VoxScriptResult.BulletPoint -> Row(
-                horizontalArrangement = Arrangement.spacedBy(VoxBoxSpacing.small),
-            ) {
-                Text("•", color = MaterialTheme.colorScheme.primary)
-                Text(result.text, style = MaterialTheme.typography.bodyLarge)
-            }
-
-            is VoxScriptResult.PieChart -> PieChartVisual(
-                percentage = result.percentage,
-                colorName = result.color,
-                label = result.label,
-            )
-
-            is VoxScriptResult.InvalidCommand -> {
-                Text("Command needs correction", style = MaterialTheme.typography.titleMedium)
-                Text(result.reason, color = MaterialTheme.colorScheme.error)
-            }
-        }
-    }
-}
-
-@Composable
 private fun PieChartVisual(
     percentage: Int,
     colorName: String,
@@ -1243,7 +775,7 @@ private fun PieChartVisual(
     ) {
         Box(
             modifier = Modifier
-                .size(96.dp)
+                .size(88.dp)
                 .clip(CircleShape)
                 .background(remainderColor),
         ) {
@@ -1261,7 +793,7 @@ private fun PieChartVisual(
         Column(Modifier.weight(1f)) {
             Text(
                 text = label.replaceFirstChar { it.titlecase() },
-                style = MaterialTheme.typography.titleLarge,
+                style = MaterialTheme.typography.titleMedium,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -1295,5 +827,5 @@ private fun namedColor(name: String): Color {
     }
 }
 
-private fun formatTimestamp(timestamp: Long): String =
+internal fun formatTimestamp(timestamp: Long): String =
     DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(timestamp))

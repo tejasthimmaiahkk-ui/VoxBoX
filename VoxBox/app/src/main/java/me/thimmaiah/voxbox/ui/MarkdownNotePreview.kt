@@ -31,6 +31,16 @@ import java.io.File
 
 private val IMAGE_LINE = Regex("^!\\[(.*)]\\(([^)]+)\\)$")
 private val NUMBERED_LINE = Regex("^(\\d+)[.)]\\s+(.*)$")
+private val HTML_COMMENT_LINE = Regex("^<!--.*-->$")
+
+/**
+ * True for a line a Markdown reader would not display.
+ *
+ * The generated note uses HTML comments as structural markers around the review-flag section, so
+ * `stripReviewAnnotations` can find and replace it. They must stay in the stored Markdown but must
+ * never be shown as literal text in the note preview.
+ */
+internal fun isHiddenMarkdownLine(line: String): Boolean = HTML_COMMENT_LINE.matches(line.trim())
 
 @Composable
 fun MarkdownNotePreview(
@@ -38,7 +48,7 @@ fun MarkdownNotePreview(
     modifier: Modifier = Modifier,
     emptyMessage: String = "Structured notes will appear here after the first processed chunk.",
 ) {
-    val lines = markdown.lineSequence().toList()
+    val lines = markdown.lineSequence().filterNot(::isHiddenMarkdownLine).toList()
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(8.dp),

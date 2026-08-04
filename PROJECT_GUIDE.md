@@ -1,7 +1,7 @@
 # VoxBox Project Guide
 
 Status: continuous multimodal MVP implemented with automated and bounded Android 16 mock-device evidence
-Last updated: 2026-08-03
+Last updated: 2026-08-04
 
 ## Working title
 
@@ -31,8 +31,10 @@ Every report, deck and viva answer must distinguish these levels:
 
 1. **Verified legacy baseline:** the earlier bounded `SpeechRecognizer`, VoxScript, Room note/block, search and manual Board-still flows passed their documented automated and physical-device checks.
 2. **Implemented continuous MVP:** the new `AudioRecord`, periodic CameraX frame, frame-difference, diarized-transcription contract, speaker-focus, incremental Markdown, folder/syllabus, crop/retention and export paths exist in the shared tree. Android JVM tests and backend mock/fake contract tests pass; Kotlin production compilation passes.
-3. **Runtime-verified mock slice:** two opt-in instrumentation tests passed independently on Android 16 against the deterministic loopback proxy. They establish the exact Voice final-partial and Video camera-plus-audio pipelines described below, not model or capture accuracy.
+3. **Runtime-verified mock slice:** two opt-in instrumentation tests passed independently on Android 16 against the deterministic loopback proxy. They establish the exact Voice final-partial and Video camera-plus-audio pipelines described below, not model or capture accuracy. Both were re-run on 2026-08-04 against the redesigned UI and passed (Voice 11.136 s, Video 32.339 s).
 4. **Not yet evaluated:** no real rotated-key OpenAI run, noisy-room/speaker corpus, endurance/resource evaluation, diagram-crop corpus or YouTube lecture trial has passed. No claim may upgrade these items until evidence is recorded.
+
+The 2026-08-04 increment also found that board evidence had never reached the note provider: the note-refinement request builder overwrote it with `null` before sending. That is fixed, covered by request-contract tests, and confirmed on device in mock mode — the Video note now reaches `## Board evidence` sections, which the proxy emits only when the request actually carries a `boardEvidence` object. It is still unconfirmed against a real provider.
 
 ## Core user story
 
@@ -85,7 +87,9 @@ The legacy Notes and manual Board-still destinations remain available while the 
 
 `PcmAudioChunkRecorder` uses Android `AudioRecord` with `MediaRecorder.AudioSource.VOICE_RECOGNITION`, 16 kHz mono PCM16 and 20-second target chunks. It enables platform noise suppression and automatic gain control when the device reports them available. A final useful partial chunk is emitted when the user stops.
 
-Each completed chunk is atomically written to app-private recovery storage before normal processing when storage is available; the queue then carries a small file reference rather than the full WAV. Audio has its own ordered unlimited channel so frame work cannot evict speech. Transcription receives at most three attempts, with 750 ms and 2 s retry delays. After transcript evidence and its note revision commit, the recovery WAV is deleted. If transcription or the note commit still fails, the WAV remains private and an operational warning is persisted into the note. If durable storage fails, the current chunk remains in memory with a visible warning, which is less robust for a long session.
+Each completed chunk is atomically written to app-private recovery storage before normal processing when storage is available; the queue then carries a small file reference rather than the full WAV. Audio has its own ordered unlimited channel so frame work cannot evict speech. Transcription receives at most three attempts, with 750 ms and 2 s retry delays, **unless the proxy reports a non-retryable failure** — an exhausted account quota, a rejected server credential or a rejected request — in which case the remaining attempts are skipped. After transcript evidence and its note revision commit, the recovery WAV is deleted. If transcription or the note commit still fails, the WAV remains private and an operational warning is persisted into the note that states whether retries were attempted. If durable storage fails, the current chunk remains in memory with a visible warning, which is less robust for a long session.
+
+Retained recovery WAVs are user-manageable. Each file's name carries its session offset and duration, the Live setup screen lists every retained file with its size and the reason it was kept, and the user can recover or delete each one. Recovery re-transcribes the WAV, persists its diarized segments as evidence and appends a labelled `## Recovered audio` section to the original note through the same revision-guarded path. It deliberately does not re-run AI refinement: the note has moved on since the failure, so a delta cannot be validated against it and captured speech must not be silently reinterpreted. Deletion is explicit and states that the audio evidence is gone.
 
 Stopping uses `stopAndDrain`: it stops microphone reads, waits for the recorder to emit a final useful partial WAV, closes both processing channels, drains their workers and only then marks the session stopped. Leaving the Live screen uses the same stop/save path.
 
@@ -158,6 +162,8 @@ The Android APK never contains an OpenAI key. Debug builds use `http://127.0.0.1
 - `gpt-5.6-terra` for incremental note synthesis.
 
 Responses use strict full/delta contracts, provider storage is disabled where supported, and the proxy forwards media in memory rather than writing it to disk. The delta contract binds output to the current content hash; the legacy full contract remains the default for older clients. Note-refinement responses have a small in-memory idempotency cache. Mock mode is deterministic and is integration evidence only.
+
+Provider failures are classified rather than collapsed into one gateway error. The proxy reads a bounded provider error body plus the response headers and preserves upstream `429`: `insufficient_quota` becomes `<kind>_quota_exhausted` with `retryable: false`, any other `429` becomes `<kind>_rate_limited` with `retryable: true`, `401`/`403` become a non-retryable `<kind>_auth_error`, other `4xx` become a non-retryable `<kind>_request_rejected`, and `5xx` or unreadable bodies stay a retryable `<kind>_provider_error`. Each error carries `retryable`, and classified failures carry the upstream status, `type`, `code`, truncated message, `x-request-id`, retry-after seconds and remaining rate-limit counters. The proxy logs only that classification; it never logs request bodies, media or the configured key. Android parses the same envelope, skips retries that cannot succeed, and shows the matching remedy in the live UI.
 
 The pasted project credential is exposed and must be revoked. A replacement belongs only in the proxy process environment. The loopback proxy has no end-user authentication or TLS; a production release requires an authenticated HTTPS backend, rate limits, monitoring and access control.
 
@@ -245,23 +251,35 @@ No percentage is reported until a versioned corpus, protocol and scorer exist.
 
 This proves deterministic mock plumbing for those two scenarios. It does not measure transcription, diarization, note, OCR, equation or diagram accuracy, and it does not establish long-session reliability.
 
+### 2026-08-04 increment
+
+- Fixed a request-serialization defect that had replaced every outgoing `boardEvidence` object with `null`, so board evidence never reached the note provider and frame-only updates were rejected outright. Covered by new request-contract tests.
+- Added typed provider-failure classification across the proxy and the Android clients, and stopped retrying failures that cannot succeed.
+- Added user-facing retained-WAV recovery and deletion, closing that pending gate at the implementation and JVM-test level.
+- Rebuilt the UI on a real design system with a self-contained icon set: selectable rows and chips instead of stacked outlined buttons with `✓` prefixes, section headers, stat tiles, actionable banners and empty states across the Notes, Live and Board screens. Removed unreachable legacy speech composables; the VoxScript source and `VoiceCaptureViewModel` remain in the tree as legacy evidence.
+- Android JVM suite: 82 tests across 27 suites, 0 failures/errors/skips. Backend Node suite: 16/16. Lint: 0 errors, 18 warnings. `app-debug.apk`: 61,182,613 bytes, SHA-256 `85190FA5E46A6017BE52FD68C82C792F4DBCB8F9B862E2A412F8C73B72F884E8`.
+- None of this is device or provider evidence. The two mock-device scenarios have not been re-run since the redesign.
+
 ### Pending before the continuous MVP can be called evaluated
 
+- Re-running both opt-in mock-device scenarios against the redesigned UI.
+- Confirming on device that board evidence now reaches `/v1/notes/refine` and is used by the note provider.
 - Physical-device v1→v2 migration and longer continuous voice/video sessions.
 - Real noisy-room speech, competing-speaker behavior and long-session resource checks.
 - A rotated-key OpenAI run and provider response/latency/cost validation.
 - Measured diarization, note, frame-filter, OCR/equation and diagram/crop accuracy.
 - YouTube lecture test matrix.
-- Periodic failed-frame cleanup independent of screen recreation, user-facing retained-WAV recovery/deletion controls and recovery/resume UX for an interrupted active session.
+- Periodic failed-frame cleanup independent of screen recreation, hardware verification of the new retained-WAV recovery/deletion controls, and recovery/resume UX for an interrupted active session.
 
 ## Immediate next gates
 
-1. Exercise v1→v2 migration on the physical device without losing legacy notes.
-2. Expand mock device coverage to Back/leave, relaunch/export, proxy outage, retained-WAV recovery and multiple frame cadences.
-3. Revoke the exposed key; intentionally configure a rotated key only in the proxy environment.
-4. Run one small live-provider test, record model/source labels, latency and cost, then fix contract issues.
-5. Build fixed noisy-audio and board/video/crop corpora before claiming accuracy.
-6. Execute text, maths and diagram YouTube trials and document failures.
+1. Re-run both opt-in mock-device scenarios against the redesigned UI and capture fresh screenshots. This is the only gate the 2026-08-04 redesign could have regressed.
+2. Confirm on device that a real changed frame now reaches `/v1/notes/refine` with `boardEvidence` present.
+3. Exercise v1→v2 migration on the physical device without losing legacy notes.
+4. Expand mock device coverage to Back/leave, relaunch/export, proxy outage, retained-WAV recovery and multiple frame cadences.
+5. Restore provider quota, then run one small live-provider test, record model/source labels, latency and cost, and recover the retained WAVs through the new in-app control.
+6. Build fixed noisy-audio and board/video/crop corpora before claiming accuracy.
+7. Execute text, maths and diagram YouTube trials and document failures.
 
 ## Project records
 

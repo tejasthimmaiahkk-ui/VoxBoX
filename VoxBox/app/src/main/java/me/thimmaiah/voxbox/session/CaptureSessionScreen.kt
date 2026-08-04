@@ -24,19 +24,22 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -52,6 +55,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -61,9 +66,19 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import java.io.File
 import java.util.Locale
 import me.thimmaiah.voxbox.audio.SpeakerFocusStatus
+import me.thimmaiah.voxbox.network.VoxBoxFailureKind
+import me.thimmaiah.voxbox.network.VoxBoxServiceFailure
 import me.thimmaiah.voxbox.ui.MarkdownNotePreview
+import me.thimmaiah.voxbox.ui.VoxBoxBanner
+import me.thimmaiah.voxbox.ui.VoxBoxChip
+import me.thimmaiah.voxbox.ui.VoxBoxChipGroup
+import me.thimmaiah.voxbox.ui.VoxBoxChoiceRow
+import me.thimmaiah.voxbox.ui.VoxBoxIcons
+import me.thimmaiah.voxbox.ui.VoxBoxLayout
 import me.thimmaiah.voxbox.ui.VoxBoxSectionCard
+import me.thimmaiah.voxbox.ui.VoxBoxSectionHeader
 import me.thimmaiah.voxbox.ui.VoxBoxSpacing
+import me.thimmaiah.voxbox.ui.VoxBoxStat
 import me.thimmaiah.voxbox.ui.VoxBoxStatusPill
 import me.thimmaiah.voxbox.ui.VoxBoxStatusTone
 
@@ -131,6 +146,8 @@ fun CaptureSessionScreen(
             },
             onReset = viewModel::resetAfterStop,
             onOpenNote = onOpenNote,
+            onRetryRetainedAudio = viewModel::retryRetainedAudio,
+            onDeleteRetainedAudio = viewModel::deleteRetainedAudio,
         )
     }
 }
@@ -153,41 +170,50 @@ private fun SessionSetupContent(
     onStart: () -> Unit,
     onReset: () -> Unit,
     onOpenNote: (String) -> Unit,
+    onRetryRetainedAudio: (String) -> Unit,
+    onDeleteRetainedAudio: (String) -> Unit,
 ) {
     var folderName by rememberSaveable { mutableStateOf("") }
+    val videoMode = state.mode == CaptureMode.VIDEO
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        contentPadding = PaddingValues(
+            start = VoxBoxLayout.compactScreenPadding,
+            top = VoxBoxSpacing.small,
+            end = VoxBoxLayout.compactScreenPadding,
+            bottom = VoxBoxLayout.listBottomPadding,
+        ),
+        verticalArrangement = Arrangement.spacedBy(VoxBoxLayout.sectionSpacing),
     ) {
-        item("promise") {
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        item("intro") {
+            Column(
+                modifier = Modifier.padding(
+                    start = VoxBoxSpacing.xSmall,
+                    end = VoxBoxSpacing.xSmall,
+                    top = VoxBoxSpacing.xSmall,
                 ),
-                shape = MaterialTheme.shapes.extraLarge,
+                verticalArrangement = Arrangement.spacedBy(VoxBoxSpacing.xSmall),
             ) {
-                Column(
-                    modifier = Modifier.padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text("One session, one living note", style = MaterialTheme.typography.headlineSmall)
-                    Text(
-                        "Voice mode records continuous audio chunks. Video mode listens too, while changed board frames are filtered locally and useful diagrams are cropped into the note.",
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
-                }
+                Text("One session, one living note", style = MaterialTheme.typography.headlineSmall)
+                Text(
+                    text = "Capture runs in the foreground while this screen stays open. " +
+                        "Leaving it stops capture and finishes the note.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
+
         if (state.stage == LiveCaptureStage.STOPPED) {
             item("finished") {
-                VoxBoxSectionCard(Modifier.fillMaxWidth()) {
+                VoxBoxSectionCard(Modifier.fillMaxWidth(), tone = VoxBoxStatusTone.Success) {
                     VoxBoxStatusPill("SAVED", tone = VoxBoxStatusTone.Success)
-                    Text(state.status, style = MaterialTheme.typography.bodyLarge)
+                    Text(state.status, style = MaterialTheme.typography.bodyMedium)
                     MarkdownNotePreview(state.generatedMarkdown)
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        OutlinedButton(onClick = onReset, modifier = Modifier.weight(1f)) { Text("New session") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(VoxBoxSpacing.small)) {
+                        OutlinedButton(onClick = onReset, modifier = Modifier.weight(1f)) {
+                            Text("New session")
+                        }
                         Button(
                             onClick = { state.activeNoteId?.let(onOpenNote) },
                             enabled = state.activeNoteId != null,
@@ -197,115 +223,174 @@ private fun SessionSetupContent(
                 }
             }
         }
+
+        state.serviceFailure?.let { failure ->
+            item("service-failure") {
+                ServiceFailureBanner(failure)
+            }
+        }
+
+        if (state.retainedAudio.isNotEmpty()) {
+            item("retained-audio") {
+                RetainedAudioSection(
+                    retained = state.retainedAudio,
+                    onRetry = onRetryRetainedAudio,
+                    onDelete = onDeleteRetainedAudio,
+                )
+            }
+        }
+
         item("mode") {
             VoxBoxSectionCard(Modifier.fillMaxWidth()) {
-                Text("1 · Capture mode", style = MaterialTheme.typography.titleLarge)
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    ChoiceButton(
+                VoxBoxSectionHeader(
+                    step = 1,
+                    title = "Capture mode",
+                    // These must not contain "Continuous audio" or "Camera + continuous audio" as a
+                    // substring: the device smoke test waits for those exact live-screen headings
+                    // with a substring matcher while the setup screen is still on screen.
+                    supportingText = if (videoMode) {
+                        "Board frames plus uninterrupted audio"
+                    } else {
+                        "Uninterrupted audio only"
+                    },
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(VoxBoxSpacing.small)) {
+                    ModeTile(
                         label = "Voice",
                         detail = "Audio only",
-                        selected = state.mode == CaptureMode.VOICE,
+                        icon = VoxBoxIcons.Microphone,
+                        selected = !videoMode,
                         onClick = { onMode(CaptureMode.VOICE) },
                         modifier = Modifier.weight(1f),
                     )
-                    ChoiceButton(
+                    ModeTile(
                         label = "Live board",
                         detail = "Camera + audio",
-                        selected = state.mode == CaptureMode.VIDEO,
+                        icon = VoxBoxIcons.Camera,
+                        selected = videoMode,
                         onClick = { onMode(CaptureMode.VIDEO) },
                         modifier = Modifier.weight(1f),
                     )
                 }
             }
         }
+
         item("note") {
             VoxBoxSectionCard(Modifier.fillMaxWidth()) {
-                Text("2 · Note destination", style = MaterialTheme.typography.titleLarge)
+                VoxBoxSectionHeader(
+                    step = 2,
+                    title = "Note destination",
+                    supportingText = "Start a new note or keep adding to a recent one",
+                )
                 OutlinedTextField(
                     value = state.noteTitle,
                     onValueChange = onTitle,
                     label = { Text("New note title") },
                     singleLine = true,
+                    enabled = state.selectedNoteId == null,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 if (state.notes.isNotEmpty()) {
-                    Text("Or continue a recent note", style = MaterialTheme.typography.labelLarge)
-                    state.notes.take(4).forEach { note ->
-                        OutlinedButton(
+                    VoxBoxChoiceRow(
+                        label = "Create a new note",
+                        supportingText = "Uses the title above",
+                        selected = state.selectedNoteId == null,
+                        onClick = { onSelectNote(null) },
+                    )
+                    state.notes.take(3).forEach { note ->
+                        VoxBoxChoiceRow(
+                            label = note.title,
+                            supportingText = "Continue this note",
+                            selected = state.selectedNoteId == note.id,
                             onClick = { onSelectNote(note.id) },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(if (state.selectedNoteId == note.id) "✓ ${note.title}" else note.title)
-                        }
-                    }
-                    if (state.selectedNoteId != null) {
-                        OutlinedButton(onClick = { onSelectNote(null) }, modifier = Modifier.fillMaxWidth()) {
-                            Text("Use a new note instead")
-                        }
+                        )
                     }
                 }
             }
         }
+
         item("policy") {
             VoxBoxSectionCard(Modifier.fillMaxWidth()) {
-                Text("3 · Note policy", style = MaterialTheme.typography.titleLarge)
-                ChoiceButton(
+                VoxBoxSectionHeader(
+                    step = 3,
+                    title = "Note style",
+                    supportingText = "How captured evidence becomes note content",
+                )
+                VoxBoxChoiceRow(
                     label = "Runnable notes",
-                    detail = "Structured, deduplicated, teacher-focused; conflicts are flagged, never silently replaced.",
+                    supportingText = "Structured and deduplicated. Conflicts are flagged for review, never silently replaced.",
                     selected = state.notePolicy == CaptureNotePolicy.RUNNABLE,
                     onClick = { onPolicy(CaptureNotePolicy.RUNNABLE) },
-                    modifier = Modifier.fillMaxWidth(),
                 )
-                ChoiceButton(
+                VoxBoxChoiceRow(
                     label = "Verbatim",
-                    detail = "Keeps every diarized utterance in timestamp order without AI summarization.",
+                    supportingText = "Every diarized utterance in timestamp order, with no AI summarization.",
                     selected = state.notePolicy == CaptureNotePolicy.VERBATIM,
                     onClick = { onPolicy(CaptureNotePolicy.VERBATIM) },
-                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         }
-        if (state.mode == CaptureMode.VIDEO) {
+
+        if (videoMode) {
             item("video-settings") {
                 VoxBoxSectionCard(Modifier.fillMaxWidth()) {
-                    Text("4 · Camera efficiency", style = MaterialTheme.typography.titleLarge)
-                    Text("Capture every ${state.frameIntervalMs / 1_000} seconds", style = MaterialTheme.typography.titleMedium)
-                    Slider(
-                        value = state.frameIntervalMs.toFloat(),
-                        onValueChange = { onFrameInterval((it / 1_000).toLong() * 1_000) },
+                    VoxBoxSectionHeader(
+                        step = 4,
+                        title = "Camera efficiency",
+                        supportingText = "Similar frames are dropped on this phone before any API call",
+                    )
+                    SliderRow(
+                        label = "Capture interval",
+                        value = "${state.frameIntervalMs / 1_000}s",
+                        sliderValue = state.frameIntervalMs.toFloat(),
                         valueRange = 2_000f..30_000f,
                         steps = 27,
+                        onValueChange = { onFrameInterval((it / 1_000).toLong() * 1_000) },
                     )
-                    Text(
-                        "Change sensitivity: ${String.format(Locale.US, "%.0f", state.changeThreshold * 100)}%",
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    Slider(
-                        value = state.changeThreshold.toFloat(),
-                        onValueChange = { onThreshold(it.toDouble()) },
+                    SliderRow(
+                        label = "Change sensitivity",
+                        value = String.format(Locale.US, "%.0f%%", state.changeThreshold * 100),
+                        sliderValue = state.changeThreshold.toFloat(),
                         valueRange = 0.02f..0.30f,
+                        steps = 0,
+                        onValueChange = { onThreshold(it.toDouble()) },
                     )
                     Text(
-                        "Similar frames are deleted locally immediately. Accepted raw frames are deleted only after note updates and diagram crops commit.",
+                        text = "An accepted raw frame is deleted only after its note update and diagram crops commit.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
         }
+
         item("organization") {
             VoxBoxSectionCard(Modifier.fillMaxWidth()) {
-                Text("${if (state.mode == CaptureMode.VIDEO) "5" else "4"} · Context & organization", style = MaterialTheme.typography.titleLarge)
+                VoxBoxSectionHeader(
+                    step = if (videoMode) 5 else 4,
+                    title = "Context and organization",
+                    supportingText = "Optional folder and syllabus for this session",
+                )
                 Text("Folder", style = MaterialTheme.typography.labelLarge)
-                OutlinedButton(onClick = { onSelectFolder(null) }, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (state.selectedFolderId == null) "✓ No folder" else "No folder")
-                }
-                state.folders.take(4).forEach { folder ->
-                    OutlinedButton(onClick = { onSelectFolder(folder.id) }, modifier = Modifier.fillMaxWidth()) {
-                        Text(if (state.selectedFolderId == folder.id) "✓ ${folder.name}" else folder.name)
+                VoxBoxChipGroup {
+                    VoxBoxChip(
+                        label = "No folder",
+                        selected = state.selectedFolderId == null,
+                        onClick = { onSelectFolder(null) },
+                    )
+                    state.folders.take(6).forEach { folder ->
+                        VoxBoxChip(
+                            label = folder.name,
+                            selected = state.selectedFolderId == folder.id,
+                            onClick = { onSelectFolder(folder.id) },
+                            icon = VoxBoxIcons.Folder,
+                        )
                     }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(VoxBoxSpacing.small),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     OutlinedTextField(
                         value = folderName,
                         onValueChange = { folderName = it.take(60) },
@@ -321,66 +406,253 @@ private fun SessionSetupContent(
                         enabled = folderName.isNotBlank(),
                     ) { Text("Add") }
                 }
-                HorizontalDivider()
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Text("Syllabus context", style = MaterialTheme.typography.labelLarge)
-                OutlinedButton(onClick = { onSelectSyllabus(null) }, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (state.selectedSyllabusId == null) "✓ No syllabus" else "No syllabus")
-                }
-                state.syllabi.take(4).forEach { syllabus ->
-                    OutlinedButton(onClick = { onSelectSyllabus(syllabus.id) }, modifier = Modifier.fillMaxWidth()) {
-                        Text(if (state.selectedSyllabusId == syllabus.id) "✓ ${syllabus.title}" else syllabus.title)
+                VoxBoxChipGroup {
+                    VoxBoxChip(
+                        label = "No syllabus",
+                        selected = state.selectedSyllabusId == null,
+                        onClick = { onSelectSyllabus(null) },
+                    )
+                    state.syllabi.take(6).forEach { syllabus ->
+                        VoxBoxChip(
+                            label = syllabus.title,
+                            selected = state.selectedSyllabusId == syllabus.id,
+                            onClick = { onSelectSyllabus(syllabus.id) },
+                            icon = VoxBoxIcons.Notes,
+                        )
                     }
                 }
-                FilledTonalButton(onClick = onImportSyllabus, modifier = Modifier.fillMaxWidth()) {
-                    Text("Import .md or .txt syllabus")
+                TextButton(onClick = onImportSyllabus) {
+                    Icon(VoxBoxIcons.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Text(
+                        text = "Import .md or .txt syllabus",
+                        modifier = Modifier.padding(start = VoxBoxSpacing.small),
+                    )
                 }
                 Text(
-                    "Syllabus text stays local until selected for a session and is treated as context—not proof of what the speaker said.",
+                    text = "Syllabus text stays local and is treated as context, not as proof of what was said.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
+
         item("start") {
             VoxBoxSectionCard(Modifier.fillMaxWidth()) {
-                VoxBoxStatusPill(
-                    label = if (permissionsGranted) "PERMISSIONS READY" else "PERMISSION NEEDED",
-                    tone = if (permissionsGranted) VoxBoxStatusTone.Success else VoxBoxStatusTone.Warning,
+                VoxBoxSectionHeader(
+                    title = "Ready to record",
+                    supportingText = if (videoMode) {
+                        "Microphone and camera are used only while this session runs"
+                    } else {
+                        "The microphone is used only while this session runs"
+                    },
+                    trailing = {
+                        VoxBoxStatusPill(
+                            label = if (permissionsGranted) "PERMISSIONS READY" else "PERMISSION NEEDED",
+                            tone = if (permissionsGranted) {
+                                VoxBoxStatusTone.Success
+                            } else {
+                                VoxBoxStatusTone.Warning
+                            },
+                        )
+                    },
                 )
                 Button(
                     onClick = onStart,
                     enabled = state.stage != LiveCaptureStage.STARTING,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .semantics { contentDescription = "Start continuous ${state.mode.name.lowercase()} session" },
+                        .semantics {
+                            contentDescription = "Start continuous ${state.mode.name.lowercase()} session"
+                        },
                 ) {
-                    Text(if (permissionsGranted) "Start live session" else "Allow & start")
+                    Icon(VoxBoxIcons.Microphone, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Text(
+                        text = if (permissionsGranted) "Start live session" else "Allow and start",
+                        modifier = Modifier.padding(start = VoxBoxSpacing.small),
+                    )
                 }
-                state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                Text(state.status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                state.error?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+                Text(
+                    text = state.status,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
 }
 
 @Composable
-private fun ChoiceButton(
+private fun ModeTile(
     label: String,
     detail: String,
+    icon: ImageVector,
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val colors = if (selected) {
-        CardDefaults.cardColors(MaterialTheme.colorScheme.secondaryContainer)
-    } else {
-        CardDefaults.cardColors(MaterialTheme.colorScheme.surfaceContainerHighest)
-    }
-    Card(onClick = onClick, modifier = modifier, colors = colors, shape = RoundedCornerShape(16.dp)) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(if (selected) "✓ $label" else label, style = MaterialTheme.typography.titleMedium)
-            Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    val colors = MaterialTheme.colorScheme
+    Surface(
+        onClick = onClick,
+        modifier = modifier,
+        shape = MaterialTheme.shapes.medium,
+        color = if (selected) colors.primary else colors.surfaceContainerHigh,
+        contentColor = if (selected) colors.onPrimary else colors.onSurfaceVariant,
+    ) {
+        Column(
+            modifier = Modifier.padding(vertical = 14.dp, horizontal = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(VoxBoxSpacing.small),
+        ) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp))
+            Text(label, style = MaterialTheme.typography.titleSmall)
+            Text(detail, style = MaterialTheme.typography.bodySmall)
         }
+    }
+}
+
+@Composable
+private fun SliderRow(
+    label: String,
+    value: String,
+    sliderValue: Float,
+    valueRange: ClosedFloatingPointRange<Float>,
+    steps: Int,
+    onValueChange: (Float) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(VoxBoxSpacing.xSmall)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(label, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                text = value,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        Slider(
+            value = sliderValue,
+            onValueChange = onValueChange,
+            valueRange = valueRange,
+            steps = steps,
+            modifier = Modifier.semantics { contentDescription = label },
+        )
+    }
+}
+
+@Composable
+private fun ServiceFailureBanner(failure: VoxBoxServiceFailure) {
+    val (title, tone) = when (failure.kind) {
+        VoxBoxFailureKind.QUOTA_EXHAUSTED -> "AI quota exhausted" to VoxBoxStatusTone.Error
+        VoxBoxFailureKind.RATE_LIMITED -> "AI service rate limited" to VoxBoxStatusTone.Warning
+        VoxBoxFailureKind.AUTH -> "AI credential rejected" to VoxBoxStatusTone.Error
+        VoxBoxFailureKind.REJECTED -> "Request rejected" to VoxBoxStatusTone.Error
+        VoxBoxFailureKind.UNAVAILABLE -> "AI service unavailable" to VoxBoxStatusTone.Warning
+    }
+    val guidance = when (failure.kind) {
+        VoxBoxFailureKind.QUOTA_EXHAUSTED ->
+            "Captured audio is retained below instead of being retried. Add provider credits, then retry each file."
+        VoxBoxFailureKind.AUTH ->
+            "The proxy's provider key was refused. Configure a valid key in the proxy environment, never in the app."
+        else -> "Captured evidence is preserved locally; nothing was discarded."
+    }
+    VoxBoxBanner(
+        title = title,
+        message = "${failure.message}\n$guidance",
+        tone = tone,
+    )
+}
+
+@Composable
+private fun RetainedAudioSection(
+    retained: List<RetainedAudioChunk>,
+    onRetry: (String) -> Unit,
+    onDelete: (String) -> Unit,
+) {
+    VoxBoxSectionCard(Modifier.fillMaxWidth()) {
+        VoxBoxSectionHeader(
+            title = "Unrecovered audio",
+            supportingText = "Kept privately on this phone until you recover or delete it",
+            trailing = {
+                VoxBoxStatusPill(
+                    label = "${retained.size} FILE(S)",
+                    tone = VoxBoxStatusTone.Warning,
+                )
+            },
+        )
+        retained.take(8).forEach { chunk ->
+            Surface(
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            ) {
+                Column(
+                    modifier = Modifier.padding(VoxBoxSpacing.medium),
+                    verticalArrangement = Arrangement.spacedBy(VoxBoxSpacing.small),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(VoxBoxSpacing.small),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = VoxBoxIcons.Waveform,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            text = "${formatClock(chunk.offsetMs)} · " +
+                                "${(chunk.durationMs / 1_000).coerceAtLeast(0)}s · " +
+                                "${chunk.sizeBytes / 1_024} KB",
+                            style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (chunk.retrying) {
+                            VoxBoxStatusPill(
+                                label = "RETRYING",
+                                tone = VoxBoxStatusTone.Accent,
+                                pulsing = true,
+                            )
+                        }
+                    }
+                    Text(
+                        text = chunk.reason,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(VoxBoxSpacing.small)) {
+                        FilledTonalButton(
+                            onClick = { onRetry(chunk.id) },
+                            enabled = !chunk.retrying,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Icon(VoxBoxIcons.Retry, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Text("Recover", modifier = Modifier.padding(start = VoxBoxSpacing.small))
+                        }
+                        OutlinedButton(
+                            onClick = { onDelete(chunk.id) },
+                            enabled = !chunk.retrying,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Icon(VoxBoxIcons.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Text("Delete", modifier = Modifier.padding(start = VoxBoxSpacing.small))
+                        }
+                    }
+                }
+            }
+        }
+        Text(
+            text = "Recovery appends a labelled verbatim section to the original note. " +
+                "Deleting discards that audio evidence permanently.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -394,63 +666,18 @@ private fun LiveSessionContent(
 ) {
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        contentPadding = PaddingValues(
+            start = VoxBoxLayout.compactScreenPadding,
+            top = VoxBoxSpacing.small,
+            end = VoxBoxLayout.compactScreenPadding,
+            bottom = VoxBoxLayout.listBottomPadding,
+        ),
+        verticalArrangement = Arrangement.spacedBy(VoxBoxLayout.sectionSpacing),
     ) {
         item("live-status") {
-            Card(
-                colors = CardDefaults.cardColors(MaterialTheme.colorScheme.primaryContainer),
-                shape = MaterialTheme.shapes.extraLarge,
-            ) {
-                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        VoxBoxStatusPill(
-                            if (state.stage == LiveCaptureStage.STOPPING) "FINISHING" else "LIVE",
-                            tone = VoxBoxStatusTone.Warning,
-                        )
-                        Text("Revision ${state.revision}", style = MaterialTheme.typography.labelLarge)
-                    }
-                    Text(
-                        if (state.mode == CaptureMode.VIDEO) "Camera + continuous audio" else "Continuous audio",
-                        style = MaterialTheme.typography.headlineSmall,
-                    )
-                    Text(
-                        "Foreground-only: keep Live open. Leaving this screen stops capture and drains saved audio before finishing the note.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    )
-                    Text(state.status, style = MaterialTheme.typography.bodyMedium)
-                    if (state.pendingAudioChunks > 0 || state.pendingFrames > 0) {
-                        Text(
-                            "Queued independently: ${state.pendingAudioChunks} audio · ${state.pendingFrames} frame(s)",
-                            style = MaterialTheme.typography.labelMedium,
-                        )
-                    }
-                    if (state.retainedAudioChunks > 0) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.errorContainer,
-                            shape = RoundedCornerShape(12.dp),
-                        ) {
-                            Text(
-                                "${state.retainedAudioChunks} unrecovered WAV file(s) are retained privately on this phone.",
-                                modifier = Modifier.padding(12.dp),
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                    }
-                    Button(
-                        onClick = onStop,
-                        enabled = state.stage == LiveCaptureStage.RUNNING,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Stop and finish note") }
-                }
-            }
+            LiveHeaderCard(state = state, onStop = onStop)
         }
+
         if (state.mode == CaptureMode.VIDEO) {
             item("camera") {
                 LiveCameraPanel(
@@ -461,88 +688,112 @@ private fun LiveSessionContent(
             }
             item("frame-counters") {
                 VoxBoxSectionCard(Modifier.fillMaxWidth()) {
-                    Text("Frame efficiency", style = MaterialTheme.typography.titleLarge)
-                    Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                        Counter("Accepted", state.acceptedFrames)
-                        Counter("Skipped", state.skippedFrames)
-                        Counter("Done", state.processedFrames)
-                    }
-                    state.lastFrameChangeScore?.let {
-                        Text(
-                            "Last change score: ${String.format(Locale.US, "%.1f", it * 100)}%",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
+                    VoxBoxSectionHeader(
+                        title = "Frame efficiency",
+                        supportingText = state.lastFrameChangeScore?.let {
+                            "Last change score ${String.format(Locale.US, "%.1f", it * 100)}%"
+                        } ?: "Similar frames never reach the API",
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(VoxBoxSpacing.small)) {
+                        VoxBoxStat("${state.acceptedFrames}", "Accepted", Modifier.weight(1f))
+                        VoxBoxStat("${state.skippedFrames}", "Skipped", Modifier.weight(1f))
+                        VoxBoxStat("${state.processedFrames}", "Done", Modifier.weight(1f))
                     }
                 }
             }
         }
+
         item("speaker") {
             VoxBoxSectionCard(Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("Speaker focus", style = MaterialTheme.typography.titleLarge)
-                    VoxBoxStatusPill(
-                        state.speakerFocus.status.name,
-                        tone = when (state.speakerFocus.status) {
-                            SpeakerFocusStatus.FOCUSED, SpeakerFocusStatus.MANUAL -> VoxBoxStatusTone.Success
-                            SpeakerFocusStatus.AMBIGUOUS, SpeakerFocusStatus.UNAVAILABLE -> VoxBoxStatusTone.Warning
-                            SpeakerFocusStatus.LEARNING -> VoxBoxStatusTone.Accent
-                        },
-                    )
-                }
-                Text(state.speakerFocus.reason, style = MaterialTheme.typography.bodyMedium)
-                state.speakerFocus.selectedSpeakerId?.let {
-                    Text("Dominant label in latest chunk: $it", style = MaterialTheme.typography.labelLarge)
-                }
+                VoxBoxSectionHeader(
+                    title = "Speaker focus",
+                    supportingText = state.speakerFocus.reason,
+                    trailing = {
+                        VoxBoxStatusPill(
+                            label = state.speakerFocus.status.name,
+                            tone = when (state.speakerFocus.status) {
+                                SpeakerFocusStatus.FOCUSED, SpeakerFocusStatus.MANUAL -> VoxBoxStatusTone.Success
+                                SpeakerFocusStatus.AMBIGUOUS, SpeakerFocusStatus.UNAVAILABLE -> VoxBoxStatusTone.Warning
+                                SpeakerFocusStatus.LEARNING -> VoxBoxStatusTone.Accent
+                            },
+                        )
+                    },
+                )
                 val speakers = state.latestChunkSpeakerIds.take(4)
                 if (speakers.isNotEmpty()) {
-                    Text("Manual mark for latest chunk", style = MaterialTheme.typography.labelLarge)
                     Text(
-                        "Labels such as A/B are local to one transcription request and are never assumed to identify the same person later.",
+                        text = "A/B labels belong to one transcription request and are never assumed " +
+                            "to be the same person later.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    speakers.forEach { speaker ->
-                        OutlinedButton(
-                            onClick = { onSelectPrimarySpeaker(speaker) },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(if (state.speakerFocus.selectedSpeakerId == speaker) "✓ Speaker $speaker" else "Use speaker $speaker")
+                    VoxBoxChipGroup {
+                        VoxBoxChip(
+                            label = "Automatic",
+                            selected = state.speakerFocus.selectedSpeakerId == null,
+                            onClick = { onSelectPrimarySpeaker(null) },
+                        )
+                        speakers.forEach { speaker ->
+                            VoxBoxChip(
+                                label = "Speaker $speaker",
+                                selected = state.speakerFocus.selectedSpeakerId == speaker,
+                                onClick = { onSelectPrimarySpeaker(speaker) },
+                            )
                         }
-                    }
-                    OutlinedButton(onClick = { onSelectPrimarySpeaker(null) }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Use automatic choice for this chunk")
                     }
                 }
             }
         }
+
         item("note-preview") {
             VoxBoxSectionCard(Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("Structured note", style = MaterialTheme.typography.titleLarge)
-                    if (state.pendingEvents > 0) VoxBoxStatusPill("${state.pendingEvents} QUEUED")
-                }
+                VoxBoxSectionHeader(
+                    title = "Structured note",
+                    supportingText = "Revision ${state.revision}",
+                    trailing = {
+                        if (state.pendingEvents > 0) {
+                            VoxBoxStatusPill(
+                                label = "${state.pendingEvents} QUEUED",
+                                tone = VoxBoxStatusTone.Accent,
+                                pulsing = true,
+                            )
+                        }
+                    },
+                )
                 MarkdownNotePreview(state.generatedMarkdown.ifBlank { state.existingNoteMarkdown })
             }
         }
+
         item("transcript") {
             VoxBoxSectionCard(Modifier.fillMaxWidth()) {
-                Text("Evidence transcript", style = MaterialTheme.typography.titleLarge)
+                VoxBoxSectionHeader(
+                    title = "Evidence transcript",
+                    supportingText = "Stored before it contributes to the note",
+                )
                 if (state.transcript.isEmpty()) {
-                    Text("Completed diarized segments will appear after each audio chunk.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        text = "Completed diarized segments appear after each audio chunk.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 } else {
                     state.transcript.takeLast(12).forEach { line ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(formatClock(line.startMs), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                        Row(horizontalArrangement = Arrangement.spacedBy(VoxBoxSpacing.medium)) {
+                            Text(
+                                text = formatClock(line.startMs),
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontFamily = FontFamily.Monospace,
+                                ),
+                                color = MaterialTheme.colorScheme.primary,
+                            )
                             Column(Modifier.weight(1f)) {
-                                Text(line.speakerId?.let { "Speaker $it" }.orEmpty(), style = MaterialTheme.typography.labelMedium)
+                                line.speakerId?.let { speaker ->
+                                    Text(
+                                        text = if (line.primary) "Speaker $speaker · focus" else "Speaker $speaker",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
                                 Text(line.text, style = MaterialTheme.typography.bodyMedium)
                             }
                         }
@@ -550,26 +801,117 @@ private fun LiveSessionContent(
                 }
             }
         }
+
+        state.serviceFailure?.let { failure ->
+            item("live-service-failure") {
+                ServiceFailureBanner(failure)
+            }
+        }
+
         if (state.corrections.isNotEmpty() || state.warnings.isNotEmpty() || state.error != null) {
             item("review") {
                 VoxBoxSectionCard(Modifier.fillMaxWidth()) {
-                    Text("Review flags", style = MaterialTheme.typography.titleLarge)
-                    state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    VoxBoxSectionHeader(
+                        title = "Review flags",
+                        supportingText = "Suggestions and warnings; nothing was silently rewritten",
+                    )
+                    state.error?.let {
+                        Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+                    }
                     state.corrections.forEach { correction ->
                         Surface(
+                            shape = MaterialTheme.shapes.medium,
                             color = MaterialTheme.colorScheme.tertiaryContainer,
-                            shape = RoundedCornerShape(12.dp),
+                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
                         ) {
-                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Column(
+                                modifier = Modifier.padding(VoxBoxSpacing.medium),
+                                verticalArrangement = Arrangement.spacedBy(VoxBoxSpacing.xSmall),
+                            ) {
                                 Text("Captured: ${correction.captured}", style = MaterialTheme.typography.bodyMedium)
-                                Text("Suggested annotation: ${correction.suggested}", style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    text = "Suggested annotation: ${correction.suggested}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
                                 Text(correction.reason, style = MaterialTheme.typography.bodySmall)
                             }
                         }
                     }
-                    state.warnings.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+                    state.warnings.forEach { warning ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(VoxBoxSpacing.small)) {
+                            Icon(
+                                imageVector = VoxBoxIcons.Info,
+                                contentDescription = null,
+                                modifier = Modifier.size(15.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Text(
+                                text = warning,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun LiveHeaderCard(
+    state: CaptureSessionUiState,
+    onStop: () -> Unit,
+) {
+    val stopping = state.stage == LiveCaptureStage.STOPPING
+    VoxBoxSectionCard(Modifier.fillMaxWidth(), tone = VoxBoxStatusTone.Accent) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            VoxBoxStatusPill(
+                label = if (stopping) "FINISHING" else "LIVE",
+                tone = if (stopping) VoxBoxStatusTone.Warning else VoxBoxStatusTone.Error,
+                pulsing = !stopping,
+            )
+            Text("Revision ${state.revision}", style = MaterialTheme.typography.labelLarge)
+        }
+        Text(
+            text = if (state.mode == CaptureMode.VIDEO) "Camera + continuous audio" else "Continuous audio",
+            style = MaterialTheme.typography.headlineSmall,
+        )
+        Text(state.status, style = MaterialTheme.typography.bodyMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(VoxBoxSpacing.small)) {
+            VoxBoxStat("${state.pendingAudioChunks}", "Audio queue", Modifier.weight(1f))
+            VoxBoxStat("${state.pendingFrames}", "Frame queue", Modifier.weight(1f))
+            VoxBoxStat(
+                value = "${state.retainedAudioChunks}",
+                label = "Retained",
+                modifier = Modifier.weight(1f),
+                tone = if (state.retainedAudioChunks > 0) {
+                    VoxBoxStatusTone.Error
+                } else {
+                    VoxBoxStatusTone.Neutral
+                },
+            )
+        }
+        Text(
+            text = "Foreground only: keep this screen open. Leaving stops capture and drains saved audio " +
+                "before finishing the note.",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Button(
+            onClick = onStop,
+            enabled = state.stage == LiveCaptureStage.RUNNING,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.error,
+                contentColor = MaterialTheme.colorScheme.onError,
+            ),
+        ) {
+            Icon(VoxBoxIcons.Stop, contentDescription = null, modifier = Modifier.size(18.dp))
+            Text("Stop and finish note", modifier = Modifier.padding(start = VoxBoxSpacing.small))
         }
     }
 }
@@ -626,13 +968,13 @@ private fun LiveCameraPanel(
             controller.unbind()
         }
     }
-    Card(shape = MaterialTheme.shapes.extraLarge) {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Card(shape = MaterialTheme.shapes.large) {
+        Column(verticalArrangement = Arrangement.spacedBy(VoxBoxSpacing.small)) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(4f / 3f)
-                    .clip(MaterialTheme.shapes.extraLarge)
+                    .clip(MaterialTheme.shapes.large)
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest),
             ) {
                 AndroidView(
@@ -647,19 +989,26 @@ private fun LiveCameraPanel(
                     modifier = Modifier.fillMaxSize(),
                 )
                 Surface(
-                    modifier = Modifier.align(Alignment.TopCenter).padding(12.dp),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.84f),
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(VoxBoxSpacing.medium),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.86f),
                     shape = RoundedCornerShape(50),
                 ) {
                     Text(
-                        "Auto frame every ${intervalMs / 1_000}s · audio remains on",
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        text = "Auto frame every ${intervalMs / 1_000}s · audio stays on",
+                        modifier = Modifier.padding(horizontal = VoxBoxSpacing.medium, vertical = 6.dp),
                         style = MaterialTheme.typography.labelMedium,
                     )
                 }
             }
             cameraError?.let {
-                Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp))
+                Text(
+                    text = it,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = VoxBoxSpacing.small),
+                )
             }
         }
     }
@@ -693,14 +1042,6 @@ private fun captureAutomaticFrame(
     } catch (error: Exception) {
         target.delete()
         onError(error.message ?: "The automatic frame could not be captured.")
-    }
-}
-
-@Composable
-private fun Counter(label: String, value: Int) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(value.toString(), style = MaterialTheme.typography.headlineSmall)
-        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

@@ -52,6 +52,8 @@ paths:
           $ref: "#/components/responses/TooLarge"
         "415":
           $ref: "#/components/responses/UnsupportedMediaType"
+        "429":
+          $ref: "#/components/responses/ProviderRateLimited"
         "502":
           $ref: "#/components/responses/ProviderFailure"
         "503":
@@ -80,6 +82,8 @@ paths:
           $ref: "#/components/responses/TooLarge"
         "415":
           $ref: "#/components/responses/UnsupportedMediaType"
+        "429":
+          $ref: "#/components/responses/ProviderRateLimited"
         "502":
           $ref: "#/components/responses/ProviderFailure"
         "503":
@@ -117,6 +121,8 @@ paths:
           $ref: "#/components/responses/TooLarge"
         "415":
           $ref: "#/components/responses/UnsupportedMediaType"
+        "429":
+          $ref: "#/components/responses/ProviderRateLimited"
         "502":
           $ref: "#/components/responses/ProviderFailure"
         "503":
@@ -137,6 +143,15 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
     UnsupportedMediaType:
       description: Content-Type is not application/json
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ProviderRateLimited:
+      description: >-
+        The upstream provider returned 429. The proxy preserves that status and
+        separates an exhausted account quota (retryable false) from a transient
+        rate limit (retryable true).
       content:
         application/json:
           schema:
@@ -587,9 +602,49 @@ components:
         error:
           type: object
           additionalProperties: false
-          required: [code, message]
+          required: [code, message, retryable]
           properties:
             code:
               type: string
+              description: >-
+                Stable machine code. Provider failures use
+                <kind>_quota_exhausted, <kind>_rate_limited, <kind>_auth_error,
+                <kind>_request_rejected or <kind>_provider_error, where kind is
+                transcription, vision or note.
             message:
               type: string
+            retryable:
+              type: boolean
+              description: >-
+                False when retrying can only fail again, such as an exhausted
+                account quota, a rejected server credential or a malformed request.
+            provider:
+              $ref: "#/components/schemas/ProviderFailureDetail"
+    ProviderFailureDetail:
+      type: object
+      additionalProperties: false
+      description: >-
+        Upstream classification retained for diagnosis. The proxy never places
+        request payloads or credentials in this object.
+      required: [status, type, code, message, requestId, retryAfterSeconds, remainingRequests, remainingTokens]
+      properties:
+        status:
+          type: integer
+          description: Upstream HTTP status returned by the provider.
+        type:
+          type: string
+        code:
+          type: string
+        message:
+          type: string
+          description: Provider error message, truncated to 300 characters.
+        requestId:
+          type: string
+          description: Upstream x-request-id when present.
+        retryAfterSeconds:
+          type: integer
+          nullable: true
+        remainingRequests:
+          type: string
+        remainingTokens:
+          type: string

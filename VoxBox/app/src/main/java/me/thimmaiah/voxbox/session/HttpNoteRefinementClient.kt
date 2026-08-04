@@ -13,15 +13,18 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
+import me.thimmaiah.voxbox.network.VoxBoxServiceFailure
+import me.thimmaiah.voxbox.network.parseVoxBoxServiceFailure
+import me.thimmaiah.voxbox.network.transportFailure
 import me.thimmaiah.voxbox.network.validatedVoxBoxUrl
 import me.thimmaiah.voxbox.network.voxBoxApiEndpoint
 
@@ -33,7 +36,12 @@ private const val MAX_SYLLABUS_EXCERPT_CHARS = 2_000
 private const val MAX_FORWARDED_SYLLABUS_CHARS = 12_000
 private val SHA256_PATTERN = Regex("[0-9a-f]{64}")
 
-class NoteRefinementException(message: String, cause: Throwable? = null) : Exception(message, cause)
+class NoteRefinementException(
+    message: String,
+    cause: Throwable? = null,
+    /** Present when the proxy answered with a classified failure. */
+    val failure: VoxBoxServiceFailure? = null,
+) : Exception(message, cause)
 
 class HttpNoteRefinementClient(
     endpoint: String = voxBoxApiEndpoint("/v1/notes/refine"),
@@ -70,11 +78,13 @@ class HttpNoteRefinementClient(
             val status = connection.responseCode
             if (status !in 200..299) {
                 val errorBody = connection.errorStream?.use(::readUtf8Limited).orEmpty()
-                val detail = runCatching {
-                    json.parseToJsonElement(errorBody).jsonObject["error"]
-                        ?.jsonObject?.get("message")?.jsonPrimitive?.contentOrNull
-                }.getOrNull()
-                throw NoteRefinementException(detail?.take(300) ?: "The note service returned HTTP $status.")
+                val failure = parseVoxBoxServiceFailure(
+                    status = status,
+                    body = errorBody,
+                    json = json,
+                    fallbackMessage = "The note service returned HTTP $status.",
+                )
+                throw NoteRefinementException(failure.describe(), failure = failure)
             }
             val result = parseNoteRefinementResponse(connection.inputStream.use(::readUtf8Limited), json)
             if (result.requestId != request.requestId || result.sessionId != request.sessionId ||
@@ -145,7 +155,7 @@ private fun NoteRefinementRequest.requireValidIncrementalContract() {
     }
 }
 
-private fun NoteRefinementRequest.toJson(): JsonObject = buildJsonObject {
+internal fun NoteRefinementRequest.toJson(): JsonObject = buildJsonObject {
     put("requestId", requestId)
     put("sessionId", sessionId)
     put("baseRevision", baseRevision)
@@ -187,7 +197,12 @@ private fun NoteRefinementRequest.toJson(): JsonObject = buildJsonObject {
             })
         }
     })
-    boardEvidence?.let { board ->
+    // `put` returns the previous value for the key, so an elvis fallback on `?.let { put(...) }`
+    // would always overwrite real board evidence with null. Branch explicitly instead.
+    val board = boardEvidence
+    if (board == null) {
+        put("boardEvidence", JsonNull)
+    } else {
         put("boardEvidence", buildJsonObject {
             put("id", board.id)
             put("capturedAtMs", board.capturedAtMs)
@@ -197,7 +212,7 @@ private fun NoteRefinementRequest.toJson(): JsonObject = buildJsonObject {
             put("equations", board.equations.toJsonArray())
             put("diagramCaptions", board.diagramCaptions.toJsonArray())
         })
-    } ?: put("boardEvidence", kotlinx.serialization.json.JsonNull)
+    }
 }
 
 private fun List<String>.toJsonArray(): JsonArray = buildJsonArray { forEach { add(JsonPrimitive(it)) } }

@@ -18,6 +18,12 @@ interface CaptureSessionRepository {
     fun observeVisualEvidence(sessionId: String): Flow<List<VisualEvidenceEntity>>
     fun observeAssets(noteId: String): Flow<List<NoteAssetEntity>>
     suspend fun createSession(settings: CaptureSessionSettings): CaptureSessionEntity
+
+    /** Loads a session that is not the currently active one, for retained-audio recovery. */
+    suspend fun findSession(sessionId: String): CaptureSessionEntity?
+
+    /** Current content of a session's stable generated Markdown block. */
+    suspend fun generatedMarkdown(sessionId: String): String?
     suspend fun stopSession(sessionId: String): Boolean
     suspend fun resumeSession(sessionId: String): Boolean
     suspend fun appendTranscript(
@@ -97,6 +103,16 @@ class RoomCaptureSessionRepository(
             reviewState = ProvenanceReviewState.UNREVIEWED.name,
         )
         return dao.createSessionWithGeneratedBlock(session, generatedBlock, provenance)
+    }
+
+    override suspend fun findSession(sessionId: String): CaptureSessionEntity? =
+        dao.getSession(sessionId.trim())
+
+    override suspend fun generatedMarkdown(sessionId: String): String? {
+        val session = dao.getSession(sessionId.trim()) ?: return null
+        return dao.getBlock(session.generatedBlockId)
+            ?.takeIf { it.noteId == session.noteId && it.type == NoteBlockType.MARKDOWN.name }
+            ?.content
     }
 
     override suspend fun stopSession(sessionId: String): Boolean =
