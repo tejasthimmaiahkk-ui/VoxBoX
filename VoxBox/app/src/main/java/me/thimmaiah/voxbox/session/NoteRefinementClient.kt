@@ -19,6 +19,18 @@ data class BoardNoteEvidence(
     val diagramCaptions: List<String>,
 )
 
+/** How much the note should say for a given amount of evidence. */
+enum class NoteDetail {
+    /** A few bullets per genuinely new idea. */
+    CONCISE,
+    STANDARD,
+    /** Derivations and extra worked examples, still traceable to the evidence. */
+    DETAILED,
+    ;
+
+    val wireValue: String get() = name.lowercase()
+}
+
 enum class NoteRefinementResponseMode {
     FULL,
     DELTA,
@@ -49,6 +61,9 @@ data class NoteRefinementRequest(
     val transcriptSegments: List<TranscriptEvidence>,
     val boardEvidence: BoardNoteEvidence?,
     val responseMode: NoteRefinementResponseMode = NoteRefinementResponseMode.FULL,
+    val noteDetail: NoteDetail = NoteDetail.STANDARD,
+    /** Optional free-text steer. The proxy ranks it below the evidence rules. */
+    val customInstruction: String = "",
     val noteContext: IncrementalNoteContext? = null,
     val syllabusExcerpts: List<SyllabusContextExcerpt> = emptyList(),
 )

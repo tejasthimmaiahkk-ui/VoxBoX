@@ -97,6 +97,8 @@ data class CaptureSessionUiState(
     val selectedSyllabusId: String? = null,
     val mode: CaptureMode = CaptureMode.VOICE,
     val notePolicy: CaptureNotePolicy = CaptureNotePolicy.RUNNABLE,
+    val noteDetail: NoteDetail = NoteDetail.STANDARD,
+    val customInstruction: String = "",
     val frameIntervalMs: Long = CaptureSessionSettings.DEFAULT_FRAME_INTERVAL_MS,
     val changeThreshold: Double = CaptureSessionSettings.DEFAULT_CHANGE_THRESHOLD,
     val activeNoteId: String? = null,
@@ -213,6 +215,13 @@ class CaptureSessionViewModel(
     fun setMode(mode: CaptureMode) = updateSetup { copy(mode = mode, error = null) }
 
     fun setNotePolicy(policy: CaptureNotePolicy) = updateSetup { copy(notePolicy = policy, error = null) }
+
+    fun setNoteDetail(detail: NoteDetail) = updateSetup { copy(noteDetail = detail) }
+
+    /** Free-text steer sent with every note update. The proxy ranks it below the evidence rules. */
+    fun setCustomInstruction(instruction: String) = updateSetup {
+        copy(customInstruction = instruction.take(500))
+    }
 
     fun setNoteTitle(title: String) = updateSetup { copy(noteTitle = title.take(120), selectedNoteId = null) }
 
@@ -797,6 +806,8 @@ class CaptureSessionViewModel(
                         ),
                         transcriptSegments = transcriptEvidence,
                         boardEvidence = boardEvidence,
+                        noteDetail = state.noteDetail,
+                        customInstruction = state.customInstruction,
                     ),
                 )
             } catch (error: Exception) {

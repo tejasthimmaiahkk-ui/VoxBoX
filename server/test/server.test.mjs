@@ -296,28 +296,78 @@ test("live note refinement enforces request identity and caches idempotent repla
   assert.match(upstreamBody.messages[0].content, /Never silently correct/);
 });
 
-test("note refinement rejects empty evidence and invalid revision relationships", async () => {
+test("note refinement rejects empty evidence and owns every mechanical field", async () => {
   const base = await start({ env: { MOCK_AI: "1" } });
   const empty = await post(base, "/v1/notes/refine", noteRequest({ transcriptSegments: [] }));
   assert.equal(empty.status, 400);
 
+  // The model is no longer asked to echo identity, revisions, update mode or the base hash, so it
+  // cannot get them wrong. Even if it volunteers nonsense, the server's own values are returned.
+  let sent;
   const live = await start({
     env: { OPENROUTER_API_KEY: "test", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
-    fetchImpl: async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({
-        requestId: "request-1",
-        sessionId: "session-1",
-        baseRevision: 0,
+    fetchImpl: async (_url, options) => {
+      sent = JSON.parse(options.body);
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({
+        requestId: "not-my-request",
+        sessionId: "not-my-session",
+        baseRevision: 99,
         nextRevision: 9,
-        title: "Wrong revision",
-        markdown: "# Wrong",
+        title: "Model output",
+        markdown: "# Heading",
         corrections: [],
         consumedEvidenceIds: ["segment-1"],
         warnings: [],
-      }) } }] }), { status: 200 }),
+      }) } }] }), { status: 200 });
+    },
   });
-  const invalidRevision = await post(live, "/v1/notes/refine", noteRequest());
-  assert.equal(invalidRevision.status, 502);
-  assert.equal((await invalidRevision.json()).error.code, "invalid_upstream_response");
+  const response = await post(live, "/v1/notes/refine", noteRequest());
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.requestId, "request-1");
+  assert.equal(body.sessionId, "session-1");
+  assert.equal(body.baseRevision, 0);
+  assert.equal(body.nextRevision, 1);
+  assert.equal(body.title, "Model output");
+
+  // The schema sent to the model must not even contain those fields.
+  const modelSchema = sent.response_format.json_schema.schema;
+  for (const forbidden of ["requestId", "sessionId", "baseRevision", "nextRevision", "baseContentSha256", "updateMode"]) {
+    assert.ok(!(forbidden in modelSchema.properties), `${forbidden} must not be asked of the model`);
+  }
+});
+
+test("delta responses carry the server's hash and revision regardless of the model", async () => {
+  const contentSha256 = "c".repeat(64);
+  const base = await start({
+    env: { OPENROUTER_API_KEY: "test", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+    fetchImpl: async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({
+      title: "Exponents",
+      markdownDelta: "## Negative exponents",
+      corrections: [],
+      consumedEvidenceIds: ["segment-1"],
+      warnings: [],
+    }) } }] }), { status: 200 }),
+  });
+
+  const response = await post(base, "/v1/notes/refine", noteRequest({
+    requestId: "delta-hash",
+    baseRevision: 12,
+    existingMarkdown: "",
+    responseMode: "delta",
+    noteContext: {
+      title: "Exponents",
+      outlineMarkdown: "# Exponents",
+      recentMarkdown: "- earlier content",
+      contentSha256,
+    },
+  }));
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.updateMode, "delta");
+  assert.equal(body.baseContentSha256, contentSha256);
+  assert.equal(body.baseRevision, 12);
+  assert.equal(body.nextRevision, 13);
 });
 
 test("delta refinement uses bounded note context and selects relevant syllabus text", async () => {
@@ -807,4 +857,107 @@ test("verification rejects an oversized note and invalid model findings", async 
   const rejected = await post(badSeverity, "/v1/notes/verify", verifyRequest());
   assert.equal(rejected.status, 502);
   assert.equal((await rejected.json()).error.code, "invalid_upstream_response");
+});
+
+test("LaTeX delimiters are normalized to the forms Obsidian renders", async () => {
+  const base = await start({
+    env: { OPENROUTER_API_KEY: "test", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+    fetchImpl: async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({
+      title: "Exponents",
+      markdown: String.raw`Rule \[x^{-n}=\frac{1}{x^{n}}\] holds for \(x\neq 0\).`,
+      corrections: [],
+      consumedEvidenceIds: ["segment-1"],
+      warnings: [],
+    }) } }] }), { status: 200 }),
+  });
+
+  const body = await (await post(base, "/v1/notes/refine", noteRequest())).json();
+  // A real session produced \[ … \] which Obsidian rendered as literal text.
+  assert.ok(!body.markdown.includes(String.raw`\[`), "display delimiters must be rewritten");
+  assert.ok(!body.markdown.includes(String.raw`\(`), "inline delimiters must be rewritten");
+  assert.ok(body.markdown.includes("$$"), "display maths must use $$");
+  assert.ok(body.markdown.includes(String.raw`$x\neq 0$`), "inline maths must use $");
+  // LaTeX commands inside the body must survive.
+  assert.ok(body.markdown.includes(String.raw`\frac{1}{x^{n}}`));
+});
+
+test("note detail and a custom instruction reach the model and are bounded", async () => {
+  let sent;
+  const capture = async (_url, options) => {
+    sent = JSON.parse(options.body);
+    return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({
+      title: "T", markdown: "# T", corrections: [], consumedEvidenceIds: ["segment-1"], warnings: [],
+    }) } }] }), { status: 200 });
+  };
+
+  for (const [detail, phrase] of [["concise", "Be brief"], ["detailed", "You may expand"]]) {
+    const base = await start({
+      env: { OPENROUTER_API_KEY: "test", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+      fetchImpl: capture,
+    });
+    const response = await post(base, "/v1/notes/refine", noteRequest({
+      noteDetail: detail,
+      customInstruction: "Prefer worked examples over prose.",
+    }));
+    assert.equal(response.status, 200);
+    const system = sent.messages[0].content;
+    assert.ok(system.includes(phrase), `${detail} instruction missing`);
+    assert.ok(system.includes("Prefer worked examples over prose."));
+    // The user steer must be explicitly subordinate to the evidence rules.
+    assert.ok(system.includes("unless it conflicts with the evidence rules"));
+  }
+
+  const mock = await start({ env: { MOCK_AI: "1" } });
+  assert.equal((await post(mock, "/v1/notes/refine", noteRequest({ noteDetail: "enormous" }))).status, 400);
+  assert.equal(
+    (await post(mock, "/v1/notes/refine", noteRequest({ customInstruction: "x".repeat(501) }))).status,
+    400,
+  );
+  // Omitting both stays valid and defaults to standard.
+  assert.equal((await post(mock, "/v1/notes/refine", noteRequest())).status, 200);
+});
+
+test("a transient generation failure is retried once before giving up", async () => {
+  let calls = 0;
+  const base = await start({
+    env: { OPENROUTER_API_KEY: "test", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+    fetchImpl: async () => {
+      calls += 1;
+      // First attempt aborts mid-generation, as observed live; the second succeeds.
+      if (calls === 1) {
+        return new Response(JSON.stringify({
+          choices: [{ finish_reason: "error", message: { content: '{"title":"half' } }],
+        }), { status: 200 });
+      }
+      return new Response(JSON.stringify({
+        choices: [{ finish_reason: "stop", message: { content: JSON.stringify({
+          title: "Recovered", markdown: "# Recovered", corrections: [],
+          consumedEvidenceIds: ["segment-1"], warnings: [],
+        }) } }],
+      }), { status: 200 });
+    },
+  });
+
+  const response = await post(base, "/v1/notes/refine", noteRequest());
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).title, "Recovered");
+  assert.equal(calls, 2, "should have retried exactly once");
+});
+
+test("a persistent generation failure is reported rather than retried forever", async () => {
+  let calls = 0;
+  const base = await start({
+    env: { OPENROUTER_API_KEY: "test", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+    fetchImpl: async () => {
+      calls += 1;
+      return new Response(JSON.stringify({
+        choices: [{ finish_reason: "error", message: { content: '{"title":"half' } }],
+      }), { status: 200 });
+    },
+  });
+
+  const response = await post(base, "/v1/notes/refine", noteRequest());
+  assert.equal(response.status, 502);
+  assert.equal((await response.json()).error.code, "upstream_generation_failed");
+  assert.equal(calls, 2, "one attempt plus one retry, then stop");
 });

@@ -132,6 +132,8 @@ fun CaptureSessionScreen(
             permissionsGranted = permissionsGranted,
             onMode = viewModel::setMode,
             onPolicy = viewModel::setNotePolicy,
+            onNoteDetail = viewModel::setNoteDetail,
+            onCustomInstruction = viewModel::setCustomInstruction,
             onTitle = viewModel::setNoteTitle,
             onSelectNote = viewModel::selectExistingNote,
             onSelectFolder = viewModel::selectFolder,
@@ -159,6 +161,8 @@ private fun SessionSetupContent(
     permissionsGranted: Boolean,
     onMode: (CaptureMode) -> Unit,
     onPolicy: (CaptureNotePolicy) -> Unit,
+    onNoteDetail: (NoteDetail) -> Unit,
+    onCustomInstruction: (String) -> Unit,
     onTitle: (String) -> Unit,
     onSelectNote: (String?) -> Unit,
     onSelectFolder: (String?) -> Unit,
@@ -347,6 +351,34 @@ private fun SessionSetupContent(
                     selected = state.notePolicy == CaptureNotePolicy.VERBATIM,
                     onClick = { onPolicy(CaptureNotePolicy.VERBATIM) },
                 )
+                if (state.notePolicy == CaptureNotePolicy.RUNNABLE) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Text("How much detail", style = MaterialTheme.typography.labelLarge)
+                    VoxBoxChipGroup {
+                        NoteDetail.entries.forEach { detail ->
+                            VoxBoxChip(
+                                label = when (detail) {
+                                    NoteDetail.CONCISE -> "Short and precise"
+                                    NoteDetail.STANDARD -> "Balanced"
+                                    NoteDetail.DETAILED -> "Elaborate"
+                                },
+                                selected = state.noteDetail == detail,
+                                onClick = { onNoteDetail(detail) },
+                            )
+                        }
+                    }
+                    OutlinedTextField(
+                        value = state.customInstruction,
+                        onValueChange = onCustomInstruction,
+                        label = { Text("Extra instruction (optional)") },
+                        placeholder = { Text("e.g. prefer worked examples over prose") },
+                        supportingText = {
+                            Text("Captured evidence always wins if this conflicts with it.")
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 2,
+                    )
+                }
             }
         }
 

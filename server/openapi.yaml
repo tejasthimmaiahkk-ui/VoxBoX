@@ -246,7 +246,7 @@ components:
               description: Configured model id. Default google/gemini-2.5-flash-lite; overridable by environment variable.
             notes:
               type: string
-              description: Configured model id. Default openai/gpt-oss-120b; overridable by environment variable.
+              description: Configured model id. Default google/gemini-2.5-flash-lite; overridable by environment variable.
             transcription:
               type: string
               description: Configured model id. Default google/gemini-3.1-flash-lite; overridable by environment variable.
@@ -518,6 +518,17 @@ components:
           maxItems: 80
           items:
             $ref: "#/components/schemas/NoteTranscriptSegment"
+        noteDetail:
+          type: string
+          enum: [concise, standard, detailed]
+          default: standard
+          description: How much the note should say for a given amount of evidence.
+        customInstruction:
+          type: string
+          maxLength: 500
+          description: >-
+            Optional user steer. Ranked below the evidence rules, so it cannot
+            license inventing content.
         boardEvidence:
           description: Optional board extraction adapted into note evidence.
           anyOf:

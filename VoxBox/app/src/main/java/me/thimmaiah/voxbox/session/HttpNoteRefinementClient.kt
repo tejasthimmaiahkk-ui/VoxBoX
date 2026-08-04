@@ -165,6 +165,8 @@ internal fun NoteRefinementRequest.toJson(): JsonObject = buildJsonObject {
     put("notePolicy", notePolicy.name.lowercase())
     put("primarySpeakerId", primarySpeakerId.orEmpty())
     put("syllabusContext", syllabusContext)
+    put("noteDetail", noteDetail.wireValue)
+    if (customInstruction.isNotBlank()) put("customInstruction", customInstruction.take(500))
     put("existingMarkdown", existingMarkdown)
     if (syllabusExcerpts.isNotEmpty()) {
         put("syllabusExcerpts", buildJsonArray {

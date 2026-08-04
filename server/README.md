@@ -42,7 +42,7 @@ The implemented model routing is fixed in `server.mjs`:
 | Pipeline | Model | Provider API |
 | --- | --- | --- |
 | Board/projector frame | `google/gemini-2.5-flash-lite` | Chat Completions, image_url, strict JSON Schema |
-| Markdown note refinement | `openai/gpt-oss-120b` | Chat Completions, strict JSON Schema |
+| Markdown note refinement | `google/gemini-2.5-flash-lite` | Chat Completions, strict JSON Schema |
 | Audio transcription | `google/gemini-3.1-flash-lite` | Chat Completions, `input_audio`, strict diarized JSON Schema |
 
 ## Security boundary
@@ -107,7 +107,7 @@ Response:
   "mode": "mock",
   "models": {
     "vision": "google/gemini-2.5-flash-lite",
-    "notes": "openai/gpt-oss-120b",
+    "notes": "google/gemini-2.5-flash-lite",
     "transcription": "google/gemini-3.1-flash-lite"
   },
   "retention": "in-memory-forwarding-only"
@@ -375,6 +375,30 @@ The response contract has **no field that can carry replacement note content**, 
 deliberate. A finished note is captured evidence; this pass is a second opinion, not a source. The
 Android client appends the findings as a labelled `### End-of-session check` section and leaves the
 note body untouched, so accepting a suggestion stays a human decision.
+
+## Note request options
+
+| Field | Values | Effect |
+| --- | --- | --- |
+| `noteDetail` | `concise`, `standard` (default), `detailed` | How much the note says for a given amount of evidence. |
+| `customInstruction` | free text, ≤500 chars | A user steer. The instructions rank it **below** the evidence rules, so it cannot license inventing content. |
+
+## What the model is and is not asked for
+
+The model receives a **content-only** schema: `title`, the Markdown body, `corrections`,
+`consumedEvidenceIds` and `warnings`. It is never asked to echo `requestId`, `sessionId`,
+`baseRevision`, `nextRevision`, `updateMode` or `baseContentSha256` — this server already knows all
+of them, and requiring the model to repeat a 64-character hash added six ways for a good answer to
+be rejected. The server fills those in after parsing, so a delta cannot be rejected for a mechanical
+mismatch.
+
+Model Markdown is normalized before it is returned: `\[ … \]` becomes `$$ … $$`, `\( … \)`
+becomes `$ … $`, and `egin{equation}` blocks become `$$`. Obsidian and the in-app preview only
+render `$` and `$$`, so a note that looked correct to the model previously reached the user as raw
+text. LaTeX commands inside the body are untouched.
+
+A transient upstream failure — `upstream_generation_failed` or `upstream_output_truncated` — is
+retried once before being reported. Both measured note models occasionally abort mid-generation.
 
 ## Provider routing
 
