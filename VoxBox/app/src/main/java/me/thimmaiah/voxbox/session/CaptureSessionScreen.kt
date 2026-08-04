@@ -207,7 +207,20 @@ private fun SessionSetupContent(
         if (state.stage == LiveCaptureStage.STOPPED) {
             item("finished") {
                 VoxBoxSectionCard(Modifier.fillMaxWidth(), tone = VoxBoxStatusTone.Success) {
-                    VoxBoxStatusPill("SAVED", tone = VoxBoxStatusTone.Success)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(VoxBoxSpacing.small),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        VoxBoxStatusPill("SAVED", tone = VoxBoxStatusTone.Success)
+                        if (state.verifying) {
+                            VoxBoxStatusPill(
+                                label = "CHECKING",
+                                tone = VoxBoxStatusTone.Accent,
+                                pulsing = true,
+                            )
+                        }
+                    }
                     Text(state.status, style = MaterialTheme.typography.bodyMedium)
                     MarkdownNotePreview(state.generatedMarkdown)
                     Row(horizontalArrangement = Arrangement.spacedBy(VoxBoxSpacing.small)) {
@@ -227,6 +240,12 @@ private fun SessionSetupContent(
         state.serviceFailure?.let { failure ->
             item("service-failure") {
                 ServiceFailureBanner(failure)
+            }
+        }
+
+        state.verification?.takeIf { it.findings.isNotEmpty() }?.let { verification ->
+            item("verification") {
+                VerificationFindingsSection(verification)
             }
         }
 
@@ -567,6 +586,77 @@ private fun ServiceFailureBanner(failure: VoxBoxServiceFailure) {
         message = "${failure.message}\n$guidance",
         tone = tone,
     )
+}
+
+/**
+ * End-of-session review findings.
+ *
+ * Presented as suggestions to confirm, never as applied edits: the same findings are already
+ * appended to the note as a labelled review section, and the note text itself was not changed.
+ */
+@Composable
+private fun VerificationFindingsSection(verification: NoteVerification) {
+    VoxBoxSectionCard(Modifier.fillMaxWidth()) {
+        VoxBoxSectionHeader(
+            title = "End-of-session check",
+            supportingText = "Formulas, units and concepts reviewed after the session",
+            trailing = {
+                VoxBoxStatusPill(
+                    label = "${verification.findings.size} TO REVIEW",
+                    tone = if (verification.warningCount > 0) {
+                        VoxBoxStatusTone.Warning
+                    } else {
+                        VoxBoxStatusTone.Accent
+                    },
+                )
+            },
+        )
+        Text(
+            text = "These are suggestions. Nothing in the saved note was changed.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        verification.findings.take(8).forEach { finding ->
+            Surface(
+                shape = MaterialTheme.shapes.medium,
+                color = if (finding.severity == "warning") {
+                    MaterialTheme.colorScheme.tertiaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surfaceContainerHigh
+                },
+                contentColor = if (finding.severity == "warning") {
+                    MaterialTheme.colorScheme.onTertiaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+            ) {
+                Column(
+                    modifier = Modifier.padding(VoxBoxSpacing.medium),
+                    verticalArrangement = Arrangement.spacedBy(VoxBoxSpacing.xSmall),
+                ) {
+                    Text(
+                        text = "${finding.kind.name.lowercase().replaceFirstChar { it.titlecase() }} · " +
+                            "${finding.severity} · ${(finding.confidence * 100).toInt()}% confident",
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                    Text(finding.claim, style = MaterialTheme.typography.bodyMedium)
+                    Text(finding.issue, style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        text = "Suggested: ${finding.suggestion}",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        }
+        if (verification.checkedFormulas.isNotEmpty() || verification.checkedConcepts.isNotEmpty()) {
+            Text(
+                text = "Checked ${verification.checkedFormulas.size} formula(s) and " +
+                    "${verification.checkedConcepts.size} concept(s).",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
 }
 
 @Composable

@@ -115,6 +115,8 @@ data class CaptureSessionUiState(
     ),
     val latestChunkSpeakerIds: List<String> = emptyList(),
     val serviceFailure: VoxBoxServiceFailure? = null,
+    val verification: NoteVerification? = null,
+    val verifying: Boolean = false,
     val retainedAudio: List<RetainedAudioChunk> = emptyList(),
     val pendingEvents: Int = 0,
     val pendingAudioChunks: Int = 0,
@@ -158,6 +160,7 @@ class CaptureSessionViewModel(
     private val sessionRepository = RoomCaptureSessionRepository(database.captureSessionDao())
     private val transcriptionClient: AudioTranscriptionClient = HttpAudioTranscriptionClient()
     private val noteClient: NoteRefinementClient = HttpNoteRefinementClient()
+    private val verificationClient: NoteVerificationClient = HttpNoteVerificationClient()
     private val boardCoordinator = BoardExtractionCoordinator(
         remoteClient = HttpBoardExtractionClient(),
         offlineClient = MlKitBoardExtractionClient(),
@@ -414,6 +417,8 @@ class CaptureSessionViewModel(
                 activeSession = null,
                 startedAt = null,
                 existingNoteMarkdown = "",
+                verification = null,
+                verifying = false,
                 status = "Choose a capture mode and start a note.",
                 error = null,
             )
@@ -1214,6 +1219,72 @@ class CaptureSessionViewModel(
                 },
             )
         }
+        verifyFinishedNote()
+    }
+
+    /**
+     * One end-of-session check of the finished note's formulas, units and concepts.
+     *
+     * Findings are appended as a clearly labelled review section through the same revision-guarded
+     * path as everything else. The note itself is never rewritten: this is a second opinion on
+     * captured evidence, so accepting a suggestion stays the user's decision. A failed check is a
+     * warning, never a lost note.
+     */
+    private fun verifyFinishedNote() {
+        val state = _uiState.value
+        val session = state.activeSession ?: return
+        val markdown = state.generatedMarkdown
+        if (markdown.isBlank()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(verifying = true, status = "Checking formulas and concepts…") }
+            try {
+                val verification = verificationClient.verify(
+                    sessionId = session.id,
+                    requestId = "verify-${session.id}",
+                    noteMarkdown = markdown,
+                    subjectHint = state.notes.firstOrNull { it.id == state.activeNoteId }?.title.orEmpty(),
+                )
+                _uiState.update { it.copy(verification = verification, verifying = false) }
+                if (verification.findings.isEmpty()) {
+                    _uiState.update {
+                        it.copy(status = "End-of-session check found no problems in the saved note.")
+                    }
+                    return@launch
+                }
+                noteUpdateMutex.withLock {
+                    val latest = _uiState.value
+                    val annotated = appendVerificationFindings(latest.generatedMarkdown, verification)
+                    val update = sessionRepository.applyGeneratedMarkdown(
+                        sessionId = session.id,
+                        patchId = "verification-${session.id}",
+                        expectedRevision = latest.revision,
+                        markdown = annotated,
+                    )
+                    when (update) {
+                        is GeneratedMarkdownUpdateResult.Apply,
+                        is GeneratedMarkdownUpdateResult.Duplicate,
+                        -> _uiState.update {
+                            it.copy(
+                                revision = update.revision,
+                                generatedMarkdown = annotated,
+                                status = "End-of-session check added ${verification.findings.size} " +
+                                    "suggestion(s) for review.",
+                            )
+                        }
+                        else -> appendWarning(
+                            "The end-of-session check found ${verification.findings.size} suggestion(s) " +
+                                "but they could not be saved into the note.",
+                        )
+                    }
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                recordServiceFailure((error as? NoteVerificationException)?.failure)
+                _uiState.update { it.copy(verifying = false) }
+                appendWarning("The end-of-session check did not run: ${error.message}")
+            }
+        }
     }
 
     private fun updateSetup(transform: CaptureSessionUiState.() -> CaptureSessionUiState) {
@@ -1251,6 +1322,7 @@ class CaptureSessionViewModel(
         boardCoordinator.close()
         (transcriptionClient as? java.io.Closeable)?.close()
         (noteClient as? java.io.Closeable)?.close()
+        (verificationClient as? java.io.Closeable)?.close()
         super.onCleared()
     }
 }

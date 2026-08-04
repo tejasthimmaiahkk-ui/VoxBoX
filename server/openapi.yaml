@@ -131,8 +131,51 @@ paths:
           $ref: "#/components/responses/ProviderFailure"
         "503":
           $ref: "#/components/responses/ProviderNotConfigured"
+  /v1/notes/verify:
+    post:
+      tags: [Notes]
+      summary: Cross-check formulas, units and concepts in a finished note
+      description: |
+        One end-of-session review pass. The response contract deliberately has no field
+        that can carry replacement note content: a finished note is captured evidence,
+        so this endpoint can only annotate it. Findings are suggestions for a human to
+        accept or ignore.
+      operationId: verifyNote
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NoteVerifyRequest"
+      responses:
+        "200":
+          description: Review findings, or an empty list when nothing looks wrong
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NoteVerifyResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/TooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "429":
+          $ref: "#/components/responses/ProviderRateLimited"
+        "502":
+          $ref: "#/components/responses/ProviderFailure"
+        "503":
+          $ref: "#/components/responses/ProviderNotConfigured"
 components:
   responses:
+    Unauthorized:
+      description: Missing or invalid client token on a pipeline route
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
     BadRequest:
       description: Invalid JSON, fields, values, Base64, or media signature
       content:
@@ -600,6 +643,61 @@ components:
           items:
             $ref: "#/components/schemas/Correction"
         consumedEvidenceIds:
+          type: array
+          items: { type: string }
+        warnings:
+          type: array
+          items: { type: string }
+        source:
+          $ref: "#/components/schemas/Source"
+    NoteVerifyRequest:
+      type: object
+      additionalProperties: false
+      required: [sessionId, requestId, noteMarkdown]
+      properties:
+        sessionId: { type: string, maxLength: 128 }
+        requestId: { type: string, maxLength: 128 }
+        noteMarkdown:
+          type: string
+          maxLength: 24000
+          description: The finished note to review.
+        subjectHint:
+          type: string
+          maxLength: 240
+          description: Optional subject context, for example the note title.
+    NoteVerifyResponse:
+      type: object
+      additionalProperties: false
+      required: [sessionId, requestId, findings, checkedFormulas, checkedConcepts, warnings, source]
+      properties:
+        sessionId: { type: string }
+        requestId: { type: string }
+        findings:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [claim, issue, suggestion, kind, severity, confidence]
+            properties:
+              claim:
+                type: string
+                description: The exact statement quoted from the note.
+              issue: { type: string }
+              suggestion: { type: string }
+              kind:
+                type: string
+                enum: [formula, concept, units, terminology, other]
+              severity:
+                type: string
+                enum: [info, warning]
+              confidence:
+                type: number
+                minimum: 0
+                maximum: 1
+        checkedFormulas:
+          type: array
+          items: { type: string }
+        checkedConcepts:
           type: array
           items: { type: string }
         warnings:

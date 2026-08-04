@@ -330,6 +330,52 @@ npm test
 The 22 tests cover mock behavior across all pipelines, request validation before provider calls, image signatures and crop bounds, diarized transcription with chunk offsets, strict note response identity/revisions, bounded delta context, relevance-selected syllabus forwarding, evidence provenance, content-aware idempotency, provider-failure classification, client-token authentication, the rate limit and daily budget, and fenced or prefixed model output. All provider transports are mocked, so the suite makes no real or billable requests.
 
 
+## `POST /v1/notes/verify`
+
+One end-of-session review of a finished note. Request:
+
+```json
+{
+  "sessionId": "class-2026-08-04",
+  "requestId": "verify-1",
+  "noteMarkdown": "# Physics
+
+- Energy is measured in newtons.
+",
+  "subjectHint": "Introductory physics"
+}
+```
+
+`noteMarkdown` is capped at 24,000 characters. Response:
+
+```json
+{
+  "sessionId": "class-2026-08-04",
+  "requestId": "verify-1",
+  "findings": [
+    {
+      "claim": "Energy is measured in newtons.",
+      "issue": "Newtons are units of force, not energy.",
+      "suggestion": "Energy is measured in joules (J).",
+      "kind": "units",
+      "severity": "warning",
+      "confidence": 0.99
+    }
+  ],
+  "checkedFormulas": ["v = u + at"],
+  "checkedConcepts": ["energy units"],
+  "warnings": [],
+  "source": "openrouter"
+}
+```
+
+`kind` is one of `formula`, `concept`, `units`, `terminology`, `other`.
+
+The response contract has **no field that can carry replacement note content**, and that is
+deliberate. A finished note is captured evidence; this pass is a second opinion, not a source. The
+Android client appends the findings as a labelled `### End-of-session check` section and leaves the
+note body untouched, so accepting a suggestion stays a human decision.
+
 ## Provider routing
 
 All three pipelines call OpenRouter's OpenAI-compatible `POST /api/v1/chat/completions` with a
