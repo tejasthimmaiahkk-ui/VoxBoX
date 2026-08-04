@@ -659,3 +659,131 @@ device scenarios were re-run after this change and passed with the times quoted 
 - The two device scenarios remain deterministic mock plumbing. They establish neither transcription,
   diarization, note, OCR, equation nor diagram accuracy, and they say nothing about long-session
   reliability.
+
+## 2026-08-04 (later) — OpenRouter migration, proxy authentication, end-of-session check, deployment
+
+This append-only milestone follows the same-day board-evidence and UI-redesign entry. It changes the
+AI provider, so parts of the earlier "Secure proxy and model routing" description are superseded.
+
+### Why the provider changed
+
+OpenAI is no longer usable for this project: the account cannot be funded. The provider is now
+**OpenRouter**, reached through its OpenAI-compatible `POST /api/v1/chat/completions` with a `strict`
+`json_schema` response format on every pipeline.
+
+Dropping OpenAI cost one capability decision. OpenRouter's dedicated `/api/v1/audio/transcriptions`
+endpoint returns **no speaker labels**, and the speaker-focus feature depends on per-segment
+speakers. Rather than delete that feature, diarization now comes from an audio-capable model bound
+to a diarized transcript schema. That is **speaker segmentation inferred from the audio, not
+acoustic diarization with voice embeddings**. It suits how this project already treats labels —
+local to one chunk, never an identity claim — but the report must describe it that way, and its
+accuracy on real classroom audio is unmeasured.
+
+### Model selection method
+
+Candidates were measured against this project's own contracts rather than chosen by list price:
+
+- **Transcription — `google/gemini-3.1-flash-lite`.** The only candidate that returned correct
+  speaker attribution *and* honest timestamps. `mistralai/voxtral-small-24b` attributed speakers
+  correctly but fabricated offsets, reporting 8 s of segments for a 16.7 s clip, which would corrupt
+  every stored transcript timestamp. `google/gemini-2.5-flash-lite` failed on audio entirely.
+- **Vision — `google/gemini-2.5-flash-lite`.** Best normalized diagram crop by a wide margin
+  (IoU 0.59 against a known rectangle, versus 0.32 for the runner-up), and cheaper than it.
+  `google/gemma-3-12b-it` read the equation perfectly but returned a useless crop (IoU 0.00).
+- **Notes — `openai/gpt-oss-120b`.** Caught a planted factual contradiction *and* preserved the
+  captured claim in the note body. A cheaper candidate caught the same error but silently deleted
+  the original claim, which violates this project's rule that evidence is never rewritten without
+  review. That behaviour, not cost, decided it.
+
+All three are overridable by environment variable. Measured cost is roughly **$0.18 per
+lecture-hour** across the three pipelines.
+
+### Two defects found only by running against the real API
+
+- **Provider routing.** OpenRouter load-balances one model id across several upstream providers. A
+  request could land on one that ignored `response_format` and aborted mid-generation, returning a
+  half-written object with `finish_reason: "error"`. This reproduced intermittently and looked like
+  malformed model output. Every request now pins `provider: { require_parameters: true }`, which
+  removed it.
+- **Misleading diagnosis.** An incomplete completion surfaced as "invalid JSON", pointing diagnosis
+  at the parser instead of the transport. Truncation and early stops are now reported distinctly as
+  `upstream_output_truncated` and `upstream_generation_failed`, and model output is normalized for a
+  Markdown code fence or short preamble before parsing.
+
+Neither was reachable from the test suite; both required live calls.
+
+### Proxy authentication and spend bounding
+
+Published on public HTTPS the proxy would have been an open relay billed to the project's account.
+It now enforces a bearer token on all pipeline routes, compared in constant time over SHA-256
+digests. Live mode refuses to serve without `VOXBOX_CLIENT_TOKEN`, so a deployment cannot be
+accidentally open. Mock mode stays open when no token is configured, preserving the loopback
+device-test workflow. `/health` stays unauthenticated so platform health checks and uptime pingers
+can reach it.
+
+A per-caller fixed-window rate limit and a hard daily budget of billable calls bound the damage from
+a leaked token. Both are in-memory and per instance; they reset on restart and do not coordinate
+across replicas, which suits the single free-tier instance this project targets.
+
+The token is compiled into the APK and is therefore extractable by anyone holding the APK. It
+deters casual abuse and is **not** a real secret; the daily budget is the actual protection. This
+must not be described as a secured backend.
+
+Verified on device `5dfb3db8` in both configurations: unauthenticated proxy with unauthenticated app
+(Voice 14.851 s, Video 35.329 s) and token-requiring proxy with a token-carrying app (Voice
+16.918 s, Video 34.989 s). The authenticated runs are meaningful because the scenarios only pass
+when the mock transcript reaches the note, which requires a successful authenticated call; the proxy
+logged zero rejections. A direct gate check gave `401` for no token and a wrong token, `400` for the
+correct token, and `200` for `/health`.
+
+### End-of-session verification pass
+
+New `POST /v1/notes/verify` cross-checks the formulas, units and named concepts in a finished note.
+
+The response contract deliberately has **no field that can carry replacement note content**. A
+finished note is captured evidence; this pass is a second opinion, not a source, so it can only
+annotate. Findings carry the quoted claim, the issue, a corrected form, a kind, a severity and an
+honest confidence, alongside the lists of formulas and concepts actually checked.
+
+Android calls it once when a session stops and appends findings as a labelled
+`### End-of-session check` section through the same revision-guarded path as every other note
+update. The note body is untouched and the section says so. A failed check is a warning, never a
+lost note, because the note is already committed before verification runs.
+
+Verified live against a physics note containing three planted errors among five correct statements:
+
+- `s = ut + ½at³` flagged and corrected to `t²` (confidence 0.99)
+- gravity given as `9.8 m/s` flagged as a units error (confidence 0.99)
+- "energy is measured in newtons" flagged, joules suggested (confidence 0.99)
+
+None of the five correct statements were flagged, and the response carried no markdown-bearing
+field.
+
+### Deployment
+
+`server/Dockerfile` (portable across Render, Google Cloud Run and Fly.io), `server/render.yaml` with
+both secrets marked `sync: false`, and `server/DEPLOYMENT.md` covering deployment, pre-flight
+verification, the release APK build, cold-start warm-up before a demo, token rotation and cost
+ceilings.
+
+The runbook's verification steps were checked against a locally started instance in the deployed
+configuration (`HOST=0.0.0.0`, live mode) and produced exactly the documented results.
+
+### Automated evidence for this increment
+
+- Android JVM unit tests: **88 tests across 28 suites, 0 failures, 0 errors, 0 skipped** (was 84/27).
+- Backend `node --test`: **25/25 passed** (was 21), with mocks and fakes only and no billable request.
+- `lintDebug` 0 errors / 18 warnings; `assembleDebug` BUILD SUCCESSFUL.
+- Secret scan clear; the staged diff contains no credential.
+
+### Claim boundary after this milestone
+
+- Live-provider evidence exists for all four endpoints, but only with **synthetic inputs**: two TTS
+  voices, a generated whiteboard image, and a hand-written physics note. It establishes that the
+  contracts work end to end with a real model. It measures no accuracy on real classroom material.
+- The device scenarios were re-run for authentication, but **not** against a live provider; they
+  still use the mock proxy.
+- The end-of-session check has not been exercised on the device.
+- The Docker image has never been built; Docker is not installed on this machine.
+- No hosted deployment exists yet. Everything in `DEPLOYMENT.md` beyond the local configuration
+  check is untested.

@@ -2,15 +2,21 @@
 
 Status date: 2026-08-04 (see the 2026-08-04 sections at the end for the current resume point)
 
-Resume from the existing dirty working tree. Do not reset, discard or overwrite the verified legacy work. The continuous multimodal implementation has automated/unit/contract evidence plus two passing Android 16 mock-device instrumentation slices. It still has no real-provider, accuracy-corpus, endurance or YouTube validation.
+The working tree is now committed on `master`. The continuous multimodal implementation has automated/unit/contract evidence, two passing Android 16 mock-device instrumentation slices, and live-provider contract verification against OpenRouter with synthetic inputs. It still has no accuracy-corpus, endurance or YouTube validation on real classroom material.
 
-## Security action before any real AI request
+## Credential handling
 
-- Treat the OpenAI key pasted into chat as exposed and revoke it.
-- Never place a replacement key in Android source, `BuildConfig`, `local.properties`, resources, the APK or Git.
-- Configure a rotated key only as `OPENAI_API_KEY` in the loopback proxy process for an intentional test.
-- The development proxy has no authentication or TLS. Keep it bound to `127.0.0.1` and reach it with `adb reverse tcp:8787 tcp:8787`.
-- Release builds require an explicit absolute HTTPS `VOXBOX_API_BASE_URL`; Gradle/runtime validation rejects the unconfigured placeholder and unsafe URLs. A deployed release still needs an authenticated HTTPS gateway, rate limits, monitoring and secret management.
+- The provider is **OpenRouter**. Configure `OPENROUTER_API_KEY` only in the server process or the
+  host's secret store. It must never appear in Android source, `BuildConfig`, `local.properties`,
+  resources, the APK or Git. The earlier OpenAI key remains revoked and OpenAI is no longer used.
+- Live mode also requires `VOXBOX_CLIENT_TOKEN`, the shared bearer token the app presents. Without
+  it the server refuses to forward provider traffic, so a deployment is never an open relay.
+- That client token **is** compiled into the APK and is extractable by anyone holding it. It deters
+  casual abuse; the daily request budget is the real protection. Say so in the report.
+- Local development still binds `127.0.0.1` and uses `adb reverse tcp:8787 tcp:8787`. A mock proxy
+  with no configured token accepts unauthenticated calls, which keeps that workflow friction-free.
+- Release builds require an absolute HTTPS `VOXBOX_API_BASE_URL` **and** a client token of at least
+  24 characters; Gradle and runtime validation reject unsafe or unconfigured values.
 
 ## Product definition now implemented
 
@@ -56,11 +62,11 @@ The live Runnable path now uses the optional append-only delta contract while th
 
 ## Automated verification completed
 
-- Android JVM unit suite: **70 tests, 0 failures/errors/skips across 23 suites**.
+- Android JVM unit suite: **88 tests, 0 failures/errors/skips across 28 suites** (was 70 across 23).
 - Android production `compileDebugKotlin`: passed, including Room/KSP compilation.
 - Final `lintDebug`, `assembleDebug` and `assembleDebugAndroidTest`: **BUILD SUCCESSFUL**; lint has 0 errors and 18 warnings.
-- Final `app-debug.apk`: **61,182,613 bytes**, SHA-256 `DABF116DB614D0066AD3AC867C2D77BB7E344154C8B6FCAE7A563FD12CCCA0AB`.
-- Backend `node --test`: **11/11 passed** with mocks/fakes and no live/billable request.
+- `app-debug.apk` hashes are recorded per milestone in `PROJECT_LOG.md`; the figure above was superseded on 2026-08-04.
+- Backend `node --test`: **25/25 passed** with mocks/fakes and no live/billable request (was 11/11).
 - Secret scan is clear; only `server/.env.example` is present as an environment template. Final `git diff --check` exits 0.
 - Earlier verified baseline remains documented in `PROJECT_LOG.md` and `evidence/`: bounded speech state, VoxScript chart, Room persistence/reopen, organized Notes/Speak/Board UI, search unit tests and manual Board capture/mock-save/relaunch.
 
