@@ -255,3 +255,48 @@ Start the mock proxy first (`cd server && MOCK_AI=1 node server.mjs`) and run
 4. Expand device coverage to Back/leave, force-stop/relaunch, export, proxy outage, permission denial
    and additional frame cadences.
 5. Then continue with the corpus, endurance and YouTube work, which remain untouched.
+
+## Next development goal — normal wireless use
+
+Target stated 2026-08-04: deploy the proxy to an authenticated HTTPS server and build the app against
+that URL, so ordinary use needs **no USB cable, no `adb reverse` and no laptop proxy terminal**, while
+the OpenAI key stays on the hosted server and never enters the APK.
+
+### Already in place
+
+- Release builds require an absolute HTTPS `VOXBOX_API_BASE_URL`, supplied as a Gradle property or
+  environment variable. `validateVoxBoxReleaseApiBaseUrl` runs before `preReleaseBuild` and rejects a
+  missing value, a non-HTTPS scheme, embedded credentials, a query or a fragment.
+- `validatedVoxBoxUrl` repeats those checks at runtime and additionally rejects the unconfigured
+  `invalid.voxbox.local` placeholder outside debug builds.
+- The APK has never contained an OpenAI key, and the proxy forwards media in memory without writing it
+  to disk or enabling provider-side storage.
+
+### Blocking gap: the proxy has no end-user authentication
+
+This is the one thing that must be solved before any public deployment. The proxy currently accepts any
+request that reaches it. Published on HTTPS as-is it becomes an **open relay to the project's OpenAI
+account**, and every call is billed to that account. `server/README.md` already records that the
+development proxy is loopback-only for exactly this reason.
+
+Required before deploying:
+
+1. An authentication check on all three pipeline routes, rejecting unauthenticated requests before any
+   provider call or body parse beyond what validation needs.
+2. Per-client rate limiting and a request budget, so a leaked credential cannot drain the account.
+3. An Android client that sends the credential, with the release build supplying it the same way it
+   supplies the base URL — as a build-time property, never a committed file.
+4. Request logging and monitoring that records classification only, matching the existing rule that
+   bodies, media and credentials are never logged.
+
+### Honest constraint to design around
+
+Any credential shipped inside an APK is extractable by anyone who has the APK. A shared client token
+therefore raises the bar against casual abuse but is not a real secret. The realistic options are a
+shared build-time token plus a strict server-side budget and rate limit, accepting and documenting that
+limitation, or per-user sign-in so each device gets its own revocable token. The second is materially
+more work and needs an account model the project does not currently have. Whichever is chosen must be
+stated plainly in the report rather than described as securing the backend.
+
+The OpenAI key itself is not affected by this: it stays in the hosting platform's secret store and is
+read only by the server process.
