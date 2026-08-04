@@ -9,6 +9,10 @@ Phone (Wi-Fi or mobile data) → HTTPS proxy (holds the key) → OpenRouter → 
 
 Everything below is done by you. Claude cannot create accounts, deploy, or handle your key.
 
+**Already deployed?** Day-to-day management — rotating tokens and keys, changing budgets and models,
+diagnosing the warnings the app shows, reading logs, rolling back — is in
+[`OPERATIONS.md`](./OPERATIONS.md).
+
 ---
 
 ## 1. What you need before starting
@@ -161,12 +165,12 @@ Cloud Run this matters far less. A free uptime pinger hitting `/health` every 10
 
 ## 6. Rotating the client token
 
-1. Generate a new token.
-2. Update `VOXBOX_CLIENT_TOKEN` in the host and let it redeploy.
-3. Rebuild and reinstall the APK with the new `-PVOXBOX_CLIENT_TOKEN`.
+See [`OPERATIONS.md` section 3](./OPERATIONS.md#3-rotate-the-client-token) for the exact steps,
+including how to confirm the old token is actually dead before you rebuild.
 
-Old APKs stop working at step 2. There is no per-device revocation; the token is shared by every
-build that was compiled with it.
+In short: new token, update it in the host, rebuild and reinstall the APK. Old APKs stop working the
+moment the host redeploys. There is no per-device revocation; the token is shared by every build
+compiled with it.
 
 ---
 

@@ -322,6 +322,8 @@ note, OCR, equation nor diagram accuracy on real classroom material.
 - `docs/VIVA_NOTES.md`: short, defensible answers using current claim levels.
 - `docs/VOXSCRIPT_SPEC.md`: legacy/optional deterministic command layer.
 - `server/openapi.yaml`: current proxy contract.
+- `server/DEPLOYMENT.md`: first-time hosted deployment.
+- `server/OPERATIONS.md`: token/key rotation, budgets, models, error codes, logs, rollback.
 
 ## Source-control and claims policy
 

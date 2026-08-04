@@ -2,7 +2,7 @@
 
 Status date: 2026-08-04 (see the 2026-08-04 sections at the end for the current resume point)
 
-The working tree is now committed on `master`. The continuous multimodal implementation has automated/unit/contract evidence, two passing Android 16 mock-device instrumentation slices, and live-provider contract verification against OpenRouter with synthetic inputs. It still has no accuracy-corpus, endurance or YouTube validation on real classroom material.
+The working tree is committed on `main` and pushed to GitHub. The continuous multimodal implementation has automated/unit/contract evidence, two passing Android 16 mock-device instrumentation slices, and live-provider contract verification against OpenRouter with synthetic inputs. It still has no accuracy-corpus, endurance or YouTube validation on real classroom material.
 
 ## Credential handling
 
@@ -268,7 +268,8 @@ Target: ordinary use with **no USB cable, no `adb reverse` and no laptop proxy t
 provider key on the server and never in the APK. Everything on the code side is now done; the
 remaining steps are account-level and are yours to run.
 
-Follow `server/DEPLOYMENT.md`. Summary:
+Follow `server/DEPLOYMENT.md` to deploy, then `server/OPERATIONS.md` for ongoing management
+(token and key rotation, budgets, models, error codes, logs, rollback). Summary:
 
 1. Deploy `server/` to Render (blueprint provided at the repo root as `render.yaml`), Google Cloud Run, or
    Fly.io. All three have a $0 tier adequate for a demo. `Dockerfile` at the repo root works on all three.
