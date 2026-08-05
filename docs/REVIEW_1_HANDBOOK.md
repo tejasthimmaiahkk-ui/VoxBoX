@@ -8,6 +8,19 @@ one bluff discounts everything else. "Implemented and contract-tested, accuracy 
 here is my measurement plan" is a *strong* answer at review 1, not a weak one. Scope reviews reward
 clear boundaries, not big claims.
 
+**Deck map** — `outputs/VoxBox_Review1_Scope.pptx`, 14 slides:
+
+| Slides | Content | Handbook |
+| --- | --- | --- |
+| 1–3 | Title · the problem · what VoxBox does | §1 |
+| **4** | **Scope — in and out.** The slide the review is marked on | §2 |
+| 5–6 | How it works end to end · system architecture | §3 |
+| 7–8 | Core frame filter · the other four algorithms | §4 |
+| 9 | Alternatives considered and rejected | §5 |
+| 10 | Speaker focus and background noise | §6 |
+| 11–12 | Validation status · real-lecture trial | §7–8 |
+| 13–14 | Roadmap · closing | §9 |
+
 ---
 
 ## 1. The 30-second pitch
@@ -63,22 +76,36 @@ let me go deep on evidence handling and cost control rather than shallow on coll
 
 ## 3. Architecture in one breath
 
+Two capture lanes run independently and merge into a single note. This is the diagram on the
+"How it works, end to end" slide — walk it left to right.
+
 ```
-Phone (Android, Kotlin + Compose)
-  ├── AudioRecord ── 16 kHz mono PCM16 ── 20-second WAV chunks
-  └── CameraX ───── frame every 2–30 s
-                      ↓
-            on-device change filter  ── similar? delete, no API call
-                      ↓ changed
-  Room v2 database (notes, transcript, evidence, assets, provenance)
-                      ↓
-  HTTPS ── authenticated proxy (Node, on Render) ── holds the API key
-                      ↓
-  OpenRouter ── transcription / vision / notes / verification models
+  CAPTURE              ON DEVICE                 VIA THE PROXY            THE NOTE
+                       (my code)                 (model calls)            (my code)
+
+  Microphone  ──▶  Ordered audio queue   ──▶  Transcription        ──┐
+  16 kHz mono      unbounded, never             text + per-chunk      │
+  20 s chunks      dropped                      dominant speaker      │
+                                                                      ├──▶  Note builder
+  Camera      ──▶  32×32 change filter   ──▶  Board extraction     ──┘      append-only delta
+  frame every      ~450/hr → ~40 sent;          text, equations,             SHA-256 binding
+  2–30 s           rest deleted on phone        concepts, crops              revision check
+                                                                                   │
+                                                                                   ▼
+                                                                          Live Markdown note
+
+  Everything captured is written to Room as-is. No model output overwrites it.
+  At session end, a second model re-reads the note against the evidence and
+  returns findings, appended as review flags.
 ```
 
-**Why a proxy at all?** So the API key never ships inside the APK. An APK is a zip file — anything
-compiled into it is extractable. The key lives in the server's secret store.
+Deployment view: the phone talks only to **an authenticated HTTPS proxy** (Node, hosted on Render),
+which holds the API key and forwards to **OpenRouter** — transcription, vision, note and
+verification models, each selected per role and swappable by configuration.
+
+**Why a proxy at all?** So the API key never ships inside the APK. An APK is a distributable
+archive — any credential compiled into it can be recovered. The key lives in the server's secret
+store, and the app carries only a client token that can be rotated independently.
 
 ---
 
@@ -218,7 +245,7 @@ is the fastest way to lose marks.
 
 ---
 
-## 7. What is actually proven (evidence levels)
+## 7. Validation status (by level of evidence)
 
 Keep these straight. If asked "have you tested it?", answer with the level.
 
