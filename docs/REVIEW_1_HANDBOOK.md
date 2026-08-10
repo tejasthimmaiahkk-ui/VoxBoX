@@ -391,14 +391,25 @@ classification.
 Have the app **already installed and warmed up** — hit the health URL a minute before, or the free
 tier will take up to a minute to wake and it will look like a hang.
 
-1. **Live tab.** Point out the three numbered steps: mode, destination, style. Show the new detail
-   control — *short and precise* vs *elaborate*.
-2. **Pick Live board.** Show the camera interval and change-sensitivity sliders. Say the line: *"this
-   is where the cost saving happens — similar frames never leave the phone."*
-3. **Start.** Talk over a slide or a board for ~40 seconds. Point at the live counters: accepted vs
-   skipped frames — **skipped is the number to draw attention to**.
-4. **Stop.** Show the structured note appearing, the review flags, and the end-of-session check.
-5. **Notes tab.** Open the saved note, show the export.
+> Written for the redesigned app (four tabs: Home / Capture / Library / Settings). If you are
+> demoing an older build, the capture flow is one scrolling screen instead.
+
+1. **Home.** One screen, one button. Switch Voice/Board on the segmented control so they see the
+   two modes exist without a settings tour.
+2. **Session options.** Show the four decisions and nothing else: mode, destination, how it is
+   written, and the camera disclosure in board mode. Say: *"everything that isn't one of these
+   four moved into Settings, because you don't configure a lecture, you start one."*
+3. **Open the camera disclosure.** Interval and sensitivity. Say the line: *"this is where the cost
+   saving happens — a frame that hasn't changed never leaves the phone, and a change has to still
+   be there on the next sample, so someone walking past the board doesn't cost a call."*
+4. **Start.** Talk over a board for ~40 seconds. Point at the kept-vs-skipped counters — **skipped
+   is the number to draw attention to** — and at the living note filling in beside the evidence
+   transcript with its timestamps and speaker labels.
+5. **Stop.** The note opens in the reader. Show a review flag if one appeared: captured line above,
+   suggestion below, evidence quotable underneath, and **neither button rewrites the captured
+   line**. That is the design principle made visible.
+6. **Settings → Connection.** Shows which models the server is actually running, read from its own
+   `/health`. Worth 10 seconds: it is the check that catches a fix that was never deployed.
 
 **If the demo fails:** don't panic or fake it. Say *"the hosted tier is cold, here's the note from my
 recorded run"* and show the exported Markdown. Reviewers mind a bluff far more than a cold start.
