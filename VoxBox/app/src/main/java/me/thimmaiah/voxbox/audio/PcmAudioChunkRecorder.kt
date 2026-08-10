@@ -28,6 +28,11 @@ data class RecordedAudioChunk(
 class PcmAudioChunkRecorder(
     private val scope: CoroutineScope,
     private val chunkDurationMs: Long = 20_000,
+    /**
+     * How much of the previous chunk each chunk repeats. Two seconds comfortably contains a
+     * spoken clause, which is the unit that was being lost at the seam.
+     */
+    private val overlapMs: Long = 2_000,
     private val sampleRate: Int = 16_000,
 ) {
     private var recorder: AudioRecord? = null
@@ -142,6 +147,7 @@ class PcmAudioChunkRecorder(
             targetBytes = targetBytes,
             minimumUsefulBytes = minimumUsefulBytes,
             sampleRate = sampleRate,
+            overlapBytes = (bytesPerSecond * overlapMs / 1_000).toInt(),
         )
         while (job?.isActive == true && !requestedStop) {
             val count = activeRecorder.read(readBuffer, 0, readBuffer.size, AudioRecord.READ_BLOCKING)
@@ -156,20 +162,36 @@ class PcmAudioChunkRecorder(
     }
 }
 
+/**
+ * Slices the continuous microphone stream into overlapping chunks.
+ *
+ * The audio itself was never lost — one AudioRecord, read in a loop — but each chunk was
+ * transcribed on its own, so a sentence spanning a boundary was cut in half and the model, seeing
+ * a fragment at the edge of a clip, dropped it. In a real lecture that removed whole clauses.
+ *
+ * Each chunk therefore repeats the last [overlapBytes] of the previous one. The seam is covered
+ * twice, so no word is only ever seen as a fragment, and the duplicate text is removed afterwards
+ * by [trimRepeatedPrefix]. Offsets stay true to the recording clock: a chunk's offset is where its
+ * *new* audio begins, not where its overlap does.
+ */
 internal class PcmChunkAccumulator(
     private val targetBytes: Int,
     private val minimumUsefulBytes: Int,
     private val sampleRate: Int,
+    private val overlapBytes: Int = 0,
     private val idFactory: () -> String = { UUID.randomUUID().toString() },
 ) {
     private val pending = ByteArrayOutputStream(targetBytes)
     private var emittedDurationMs = 0L
+    private var carriedBytes = 0
     private var finished = false
 
     init {
         require(targetBytes > 0 && targetBytes % 2 == 0)
         require(minimumUsefulBytes in 2..targetBytes && minimumUsefulBytes % 2 == 0)
         require(sampleRate > 0)
+        require(overlapBytes >= 0 && overlapBytes % 2 == 0)
+        require(overlapBytes < targetBytes) { "Overlap must leave room for new audio." }
     }
 
     fun append(bytes: ByteArray, offset: Int = 0, count: Int = bytes.size - offset): List<RecordedAudioChunk> {
@@ -190,19 +212,32 @@ internal class PcmChunkAccumulator(
     fun finish(): RecordedAudioChunk? {
         if (finished) return null
         finished = true
-        return if (pending.size() >= minimumUsefulBytes) takeChunk() else null
+        // Only the carried overlap is left: that audio has already been transcribed once, so
+        // emitting it again would duplicate the tail of the lecture rather than extend it.
+        val newBytes = pending.size() - carriedBytes
+        return if (newBytes >= minimumUsefulBytes) takeChunk() else null
     }
 
     private fun takeChunk(): RecordedAudioChunk {
         val pcm = pending.toByteArray()
         pending.reset()
+        val carryFrom = maxOf(0, pcm.size - overlapBytes)
+        val carried = pcm.size - carryFrom
+        if (overlapBytes > 0 && carried > 0) pending.write(pcm, carryFrom, carried)
+
         val duration = pcmDurationMs(pcm.size, sampleRate)
-        return RecordedAudioChunk(
+        val overlapMs = pcmDurationMs(carriedBytes, sampleRate)
+        val chunk = RecordedAudioChunk(
             id = idFactory(),
-            offsetMs = emittedDurationMs,
+            // The overlap replays audio the previous chunk already covered, so this chunk starts
+            // that much earlier on the recording clock.
+            offsetMs = (emittedDurationMs - overlapMs).coerceAtLeast(0),
             durationMs = duration,
             wavBytes = encodePcm16MonoWav(pcm, sampleRate),
-        ).also { emittedDurationMs += duration }
+        )
+        emittedDurationMs += duration - overlapMs
+        carriedBytes = if (overlapBytes > 0) carried else 0
+        return chunk
     }
 }
 

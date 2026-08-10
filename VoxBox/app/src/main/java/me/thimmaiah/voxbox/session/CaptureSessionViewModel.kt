@@ -31,6 +31,7 @@ import me.thimmaiah.voxbox.audio.AudioTranscriptionClient
 import me.thimmaiah.voxbox.audio.AudioTranscriptionException
 import me.thimmaiah.voxbox.audio.HttpAudioTranscriptionClient
 import me.thimmaiah.voxbox.audio.PerChunkSpeakerTracker
+import me.thimmaiah.voxbox.audio.dropOverlappingSegments
 import me.thimmaiah.voxbox.debug.VbDebugLog
 import me.thimmaiah.voxbox.audio.PcmAudioChunkRecorder
 import me.thimmaiah.voxbox.audio.RecordedAudioChunk
@@ -183,6 +184,9 @@ class CaptureSessionViewModel(
     private var stopJob: Job? = null
     private var stopRequestedDuringStart = false
     private var speakerTracker = PerChunkSpeakerTracker()
+    /** Last chunk's final utterance, used to remove the overlap the next chunk repeats. */
+    private var lastTranscribedTail: String = ""
+
     private var latestPersistedTranscriptIds: Set<String> = emptySet()
     private val noteUpdateMutex = Mutex()
     private val trackedFrameFiles = synchronizedSetOf()
@@ -322,6 +326,8 @@ class CaptureSessionViewModel(
                 )
                 beginEventLoops()
                 frameChangeDetector.reset()
+                // A new lecture shares no seam with the last one.
+                lastTranscribedTail = ""
                 speakerTracker = PerChunkSpeakerTracker()
                 latestPersistedTranscriptIds = emptySet()
                 _uiState.update {
@@ -606,8 +612,28 @@ class CaptureSessionViewModel(
             persistOperationalWarning("No clear speech was found in the audio chunk at ${formatTimestamp(chunk.offsetMs)}.")
             return
         }
-        val focus = speakerTracker.evaluate(chunk.id, transcription.segments)
-        val evidence = transcription.segments.map { segment ->
+        // Chunks overlap by a couple of seconds so no word is only ever seen as a fragment at a
+        // clip edge. That means the seam arrives transcribed twice; drop the repeat before it
+        // reaches the note, or the transcript stutters at every boundary.
+        val deduplicated = dropOverlappingSegments(
+            previousTail = lastTranscribedTail,
+            segments = transcription.segments,
+            text = { it.text },
+            withText = { segment, text -> segment.copy(text = text) },
+        )
+        if (deduplicated.size != transcription.segments.size) {
+            VbDebugLog.log(
+                "transcribe",
+                "overlap trimmed ${transcription.segments.size - deduplicated.size} segment(s) at the seam",
+            )
+        }
+        lastTranscribedTail = transcription.segments.lastOrNull()?.text.orEmpty()
+        if (deduplicated.isEmpty()) {
+            deleteRecoveredAudio(chunk)
+            return
+        }
+        val focus = speakerTracker.evaluate(chunk.id, deduplicated)
+        val evidence = deduplicated.map { segment ->
             val persisted = sessionRepository.appendTranscript(
                 session.id,
                 NewTranscriptSegment(
