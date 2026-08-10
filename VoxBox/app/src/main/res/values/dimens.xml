@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- Spacing -->
+    <dimen name="vb_screen_h">20dp</dimen>
+    <dimen name="vb_gap">12dp</dimen>
+    <dimen name="vb_section">20dp</dimen>
+    <dimen name="vb_card_pad">16dp</dimen>
+
+    <!-- Corner radii -->
+    <dimen name="vb_radius_card">24dp</dimen>
+    <dimen name="vb_radius_card_l">28dp</dimen>
+    <dimen name="vb_radius_row">20dp</dimen>
+    <dimen name="vb_radius_media">18dp</dimen>
+    <dimen name="vb_radius_sheet">32dp</dimen>
+
+    <!-- Controls: nothing below 44dp is tappable -->
+    <dimen name="vb_touch_min">44dp</dimen>
+    <dimen name="vb_button_h">58dp</dimen>
+    <dimen name="vb_field_h">52dp</dimen>
+    <dimen name="vb_icon_button">40dp</dimen>
+    <dimen name="vb_nav_item_h">64dp</dimen>
+    <dimen name="vb_nav_pill_w">60dp</dimen>
+    <dimen name="vb_nav_pill_h">32dp</dimen>
+    <dimen name="vb_record_button">92dp</dimen>
+
+    <!-- Camera zoom control -->
+    <dimen name="vb_zoom_track_w">8dp</dimen>
+    <dimen name="vb_zoom_thumb">30dp</dimen>
+    <dimen name="vb_zoom_touch_w">44dp</dimen>
+
+    <!-- Reader body sizes: small / default / large / huge -->
+    <dimen name="vb_read_s">14sp</dimen>
+    <dimen name="vb_read_s_line">22sp</dimen>
+    <dimen name="vb_read_m">16sp</dimen>
+    <dimen name="vb_read_m_line">26sp</dimen>
+    <dimen name="vb_read_l">18sp</dimen>
+    <dimen name="vb_read_l_line">31sp</dimen>
+    <dimen name="vb_read_xl">20sp</dimen>
+    <dimen name="vb_read_xl_line">35sp</dimen>
+
+</resources>

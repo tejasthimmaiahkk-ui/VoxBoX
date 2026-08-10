@@ -3,79 +3,50 @@ package me.thimmaiah.voxbox.ui.theme
 import androidx.compose.ui.graphics.Color
 
 /**
- * VoxBox brand anchors.
+ * Five hues carry the whole interface: four accents plus a near-black ground.
  *
- * The primary indigo communicates focus and structure, teal distinguishes
- * capture/success states, and gold is reserved for small academic accents.
+ * Status meaning is fixed and never follows the accent — see [VbStatus]. The literals here are
+ * mirrored in `res/values/colors.xml`, which paints the window before Compose starts; change one
+ * and change the other.
  */
-val VoxIndigo = Color(0xFF3F46B5)
-val VoxTeal = Color(0xFF006B67)
-val VoxGold = Color(0xFF735C00)
-val VoxPaper = Color(0xFFFAF8FF)
-val VoxInk = Color(0xFF1B1B23)
-val VoxNight = Color(0xFF12131A)
 
-internal val VoxOnIndigo = Color(0xFFFFFFFF)
-internal val VoxIndigoContainer = Color(0xFFE0E0FF)
-internal val VoxOnIndigoContainer = Color(0xFF161A62)
-internal val VoxIndigoDark = Color(0xFFBEC2FF)
-internal val VoxOnIndigoDark = Color(0xFF181D67)
-internal val VoxIndigoContainerDark = Color(0xFF2F358E)
-internal val VoxOnIndigoContainerDark = Color(0xFFE0E0FF)
+// Accent hues. The *Dark* variants are the light-theme values, darkened to stay legible on white.
+val VbBlue = Color(0xFF4C7DFF)
+val VbBlueDark = Color(0xFF2A5BE0)
+val VbGreen = Color(0xFF22B77E)
+val VbGreenDark = Color(0xFF0E8A57)
+val VbOrange = Color(0xFFF79320)
+val VbOrangeDark = Color(0xFFC96A00)
+val VbRed = Color(0xFFF2555B)
+val VbRedDark = Color(0xFFD8353C)
 
-internal val VoxOnTeal = Color(0xFFFFFFFF)
-internal val VoxTealContainer = Color(0xFF9CF2EB)
-internal val VoxOnTealContainer = Color(0xFF00201E)
-internal val VoxTealDark = Color(0xFF80D5CF)
-internal val VoxOnTealDark = Color(0xFF003735)
-internal val VoxTealContainerDark = Color(0xFF00504C)
-internal val VoxOnTealContainerDark = Color(0xFF9CF2EB)
+// On-accent foregrounds. Orange is light enough that it needs a dark foreground to pass contrast.
+val VbOnAccentLight = Color(0xFFFFFFFF)
+val VbOnAccentDark = Color(0xFF1B1206)
 
-internal val VoxOnGold = Color(0xFFFFFFFF)
-internal val VoxGoldContainer = Color(0xFFFFE087)
-internal val VoxOnGoldContainer = Color(0xFF241A00)
-internal val VoxGoldDark = Color(0xFFE9C349)
-internal val VoxOnGoldDark = Color(0xFF3B2F00)
-internal val VoxGoldContainerDark = Color(0xFF574500)
-internal val VoxOnGoldContainerDark = Color(0xFFFFE087)
+// Dark ground
+val VbBgDark = Color(0xFF0B0C0F)
+val VbSfDark = Color(0xFF15171C)
+val VbSf2Dark = Color(0xFF1E222A)
+val VbFgDark = Color(0xFFF3F5F8)
+val VbFg2Dark = Color(0xFFA6AEBB)
+val VbFg3Dark = Color(0xFF6C7480)
+val VbLineDark = Color(0x1AFFFFFF)
 
-internal val VoxOnPaper = VoxInk
-internal val VoxSurfaceVariant = Color(0xFFE4E1EC)
-internal val VoxOnSurfaceVariant = Color(0xFF46464F)
-internal val VoxOutline = Color(0xFF777680)
-internal val VoxOutlineVariant = Color(0xFFC7C5D0)
-internal val VoxInverseSurface = Color(0xFF303038)
-internal val VoxInverseOnSurface = Color(0xFFF2EFF9)
-internal val VoxInversePrimary = VoxIndigoDark
+// Light ground
+val VbBgLight = Color(0xFFF4F5F3)
+val VbSfLight = Color(0xFFFFFFFF)
+val VbSf2Light = Color(0xFFEAECF0)
+val VbFgLight = Color(0xFF12141A)
+val VbFg2Light = Color(0xFF5A6270)
+val VbFg3Light = Color(0xFF8A929E)
+val VbLineLight = Color(0x1C0C0E12)
 
-internal val VoxSurfaceLowest = Color(0xFFFFFFFF)
-internal val VoxSurfaceLow = Color(0xFFF4F2FA)
-internal val VoxSurface = Color(0xFFEEECF4)
-internal val VoxSurfaceHigh = Color(0xFFE8E6EE)
-internal val VoxSurfaceHighest = Color(0xFFE2E0E8)
-internal val VoxSurfaceDim = Color(0xFFDBD9E1)
-
-internal val VoxOnNight = Color(0xFFE5E1EA)
-internal val VoxSurfaceVariantDark = Color(0xFF46464F)
-internal val VoxOnSurfaceVariantDark = Color(0xFFC7C5D0)
-internal val VoxOutlineDark = Color(0xFF90909A)
-internal val VoxOutlineVariantDark = Color(0xFF46464F)
-internal val VoxInverseSurfaceDark = VoxOnNight
-internal val VoxInverseOnSurfaceDark = Color(0xFF303038)
-internal val VoxInversePrimaryDark = Color(0xFF4A50BD)
-
-internal val VoxSurfaceLowestDark = Color(0xFF0D0E15)
-internal val VoxSurfaceLowDark = Color(0xFF1B1C24)
-internal val VoxSurfaceDark = Color(0xFF1F2028)
-internal val VoxSurfaceHighDark = Color(0xFF292A32)
-internal val VoxSurfaceHighestDark = Color(0xFF34343D)
-internal val VoxSurfaceBrightDark = Color(0xFF383941)
-
-internal val VoxError = Color(0xFFBA1A1A)
-internal val VoxOnError = Color(0xFFFFFFFF)
-internal val VoxErrorContainer = Color(0xFFFFDAD6)
-internal val VoxOnErrorContainer = Color(0xFF410002)
-internal val VoxErrorDark = Color(0xFFFFB4AB)
-internal val VoxOnErrorDark = Color(0xFF690005)
-internal val VoxErrorContainerDark = Color(0xFF93000A)
-internal val VoxOnErrorContainerDark = Color(0xFFFFDAD6)
+// The live capture surface is always dark, in both themes: it is a camera and a stage, and a
+// white page behind a lecture-hall photo is unreadable.
+val VbLiveBg = Color(0xFF07080A)
+val VbLiveSf = Color(0xFF0F1116)
+val VbLiveLine = Color(0x14FFFFFF)
+val VbLiveFg = Color(0xFFF3F5F8)
+val VbLiveFg2 = Color(0xFF8E96A3)
+val VbLiveFgBody = Color(0xFFDDE2EA)

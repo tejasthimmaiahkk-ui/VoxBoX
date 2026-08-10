@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  VoxBox redesign colour tokens.
+  Five mandatory hues: blue, green, orange, red, black.
+  Status meanings are FIXED and never follow the user's accent choice:
+    green  = saved / verified
+    orange = needs your review
+    red    = recording / destructive / failure
+    accent = user choice of blue | green | orange | red
+    black  = ground
+-->
+<resources>
+
+    <!-- Accent hues. *_dark variants are the light-theme values (contrast-safe on white). -->
+    <color name="vb_blue">#FF4C7DFF</color>
+    <color name="vb_blue_dark">#FF2A5BE0</color>
+    <color name="vb_green">#FF22B77E</color>
+    <color name="vb_green_dark">#FF0E8A57</color>
+    <color name="vb_orange">#FFF79320</color>
+    <color name="vb_orange_dark">#FFC96A00</color>
+    <color name="vb_red">#FFF2555B</color>
+    <color name="vb_red_dark">#FFD8353C</color>
+
+    <!-- On-accent foregrounds. Orange needs a dark foreground to pass contrast. -->
+    <color name="vb_on_accent_light">#FFFFFFFF</color>
+    <color name="vb_on_accent_dark">#FF1B1206</color>
+
+    <!-- Dark ground -->
+    <color name="vb_bg_dark">#FF0B0C0F</color>
+    <color name="vb_surface_dark">#FF15171C</color>
+    <color name="vb_surface_variant_dark">#FF1E222A</color>
+    <color name="vb_fg_dark">#FFF3F5F8</color>
+    <color name="vb_fg2_dark">#FFA6AEBB</color>
+    <color name="vb_fg3_dark">#FF6C7480</color>
+    <color name="vb_line_dark">#1AFFFFFF</color>
+
+    <!-- Light ground -->
+    <color name="vb_bg_light">#FFF4F5F3</color>
+    <color name="vb_surface_light">#FFFFFFFF</color>
+    <color name="vb_surface_variant_light">#FFEAECF0</color>
+    <color name="vb_fg_light">#FF12141A</color>
+    <color name="vb_fg2_light">#FF5A6270</color>
+    <color name="vb_fg3_light">#FF8A929E</color>
+    <color name="vb_line_light">#1C0C0E12</color>
+
+    <!-- Live session ground: always dark, in both themes. -->
+    <color name="vb_live_bg">#FF07080A</color>
+    <color name="vb_live_surface">#FF0F1116</color>
+    <color name="vb_live_line">#14FFFFFF</color>
+    <color name="vb_live_fg">#FFF3F5F8</color>
+    <color name="vb_live_fg2">#FF8E96A3</color>
+    <color name="vb_live_body">#FFDDE2EA</color>
+
+    <!-- Scrims -->
+    <color name="vb_scrim_sheet">#8C040507</color>
+    <color name="vb_scrim_lightbox">#F0030406</color>
+
+</resources>

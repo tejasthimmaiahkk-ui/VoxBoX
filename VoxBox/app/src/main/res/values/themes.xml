@@ -1,5 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  The app is entirely Compose: the colour scheme, accent and status semantics are built in
+  ui/theme/Theme.kt. This XML theme exists for the one job Compose cannot do — painting the
+  window before the first frame, so there is no white flash into a dark UI.
+
+  Deliberately framework-only. Material3 XML attributes (colorPrimary and friends) would pull
+  in com.google.android.material for chrome the app never renders, and the accent overlays
+  they enable are decided in Compose anyway.
+-->
 <resources>
 
-    <style name="Theme.VoxBox" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.VoxBox" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:colorBackground">@color/vb_bg_light</item>
+        <item name="android:windowBackground">@color/vb_bg_light</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+
 </resources>
