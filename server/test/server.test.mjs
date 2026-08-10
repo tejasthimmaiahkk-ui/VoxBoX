@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import {
   createVoxBoxServer,
+  normalizeNoteMarkdown,
   NOTE_MODEL,
   TRANSCRIPTION_MODEL,
   VISION_MODEL,
@@ -420,11 +421,11 @@ test("delta refinement uses bounded note context and selects relevant syllabus t
   assert.deepEqual(await first.json(), { ...expected, source: "openrouter" });
   assert.deepEqual(await replay.json(), { ...expected, source: "openrouter" });
   assert.equal(calls, 1);
-  assert.equal(upstreamBody.max_tokens, 3_000);
+  assert.equal(upstreamBody.max_tokens, 1_200);
   assert.equal(upstreamBody.response_format.json_schema.name, "note_delta");
   const providerRequest = JSON.parse(upstreamBody.messages[1].content);
   assert.equal(providerRequest.existingMarkdown, "");
-  assert.ok(providerRequest.syllabusContext.length <= 12_000);
+  assert.ok(providerRequest.syllabusContext.length <= 4_000);
   assert.match(providerRequest.syllabusContext, /derivative of x squared/i);
   assert.equal(providerRequest.noteContext.contentSha256, contentSha256);
 });
@@ -960,4 +961,51 @@ test("a persistent generation failure is reported rather than retried forever", 
   assert.equal(response.status, 502);
   assert.equal((await response.json()).error.code, "upstream_generation_failed");
   assert.equal(calls, 2, "one attempt plus one retry, then stop");
+});
+
+// --- Markdown delimiter normalisation -------------------------------------------------
+//
+// Every case here was seen in output from a real session. The rendering targets are
+// Obsidian and the in-app preview, which understand `$` and `$$` and nothing else.
+
+const BS = String.fromCharCode(92); // keeps LaTeX escapes readable in assertions
+
+test("bracket and paren delimiters become dollar math", () => {
+  const out = normalizeNoteMarkdown(String.raw`Given \( x^2 - 9 \), we factorise:
+\[ x^2 - 9 = (x-3)(x+3) \]`);
+  assert.match(out, /\$x\^2 - 9\$/);
+  assert.match(out, /\$\$\nx\^2 - 9 = \(x-3\)\(x\+3\)\n\$\$/);
+  assert.ok(!out.includes(BS + "["), "\\[ should be gone");
+  assert.ok(!out.includes(BS + "("), "\\( should be gone");
+});
+
+test("display environments become dollar math, starred forms included", () => {
+  for (const env of ["equation", "align", "align*", "gather", "multline", "eqnarray"]) {
+    const out = normalizeNoteMarkdown(`${BS}begin{${env}}\na = b\n${BS}end{${env}}`);
+    assert.equal(out, "$$\na = b\n$$", `environment ${env} was not converted`);
+  }
+});
+
+test("a bare math-only environment is wrapped rather than left as literal text", () => {
+  const source = `Solve:\n${BS}begin{cases}\nx + y = 2\nx - y = 0\n${BS}end{cases}`;
+  const out = normalizeNoteMarkdown(source);
+  assert.ok(out.includes(`$$\n${BS}begin{cases}`), out);
+  assert.ok(out.includes(`${BS}end{cases}\n$$`), out);
+});
+
+test("a math-only environment already inside display math is not double wrapped", () => {
+  const input = `$$\n${BS}begin{aligned}\na &= b\n${BS}end{aligned}\n$$`;
+  assert.equal(normalizeNoteMarkdown(input), input);
+});
+
+test("fenced code showing LaTeX source survives untouched", () => {
+  const input = "Write it like this:\n\n```latex\n" + BS + "[ a^2 + b^2 = c^2 " + BS + "]\n```\n";
+  assert.equal(normalizeNoteMarkdown(input), input);
+});
+
+test("math outside a fence is still converted when a fence is present", () => {
+  const input = "```\nliteral " + BS + "[ kept " + BS + "]\n```\n\nNow " + BS + "( e = mc^2 " + BS + ").";
+  const out = normalizeNoteMarkdown(input);
+  assert.ok(out.includes("literal " + BS + "[ kept " + BS + "]"), out);
+  assert.match(out, /\$e = mc\^2\$/);
 });

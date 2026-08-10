@@ -97,7 +97,7 @@ data class CaptureSessionUiState(
     val selectedSyllabusId: String? = null,
     val mode: CaptureMode = CaptureMode.VOICE,
     val notePolicy: CaptureNotePolicy = CaptureNotePolicy.RUNNABLE,
-    val noteDetail: NoteDetail = NoteDetail.STANDARD,
+    val noteDetail: NoteDetail = NoteDetail.CONCISE,
     val customInstruction: String = "",
     val frameIntervalMs: Long = CaptureSessionSettings.DEFAULT_FRAME_INTERVAL_MS,
     val changeThreshold: Double = CaptureSessionSettings.DEFAULT_CHANGE_THRESHOLD,

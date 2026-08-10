@@ -2,11 +2,19 @@ package me.thimmaiah.voxbox.session
 
 import java.nio.charset.StandardCharsets
 
-private const val MAX_OUTLINE_CHARS = 12_000
-private const val MAX_RECENT_CHARS = 24_000
-private const val MAX_EXCERPTS = 6
-private const val MAX_EXCERPT_CHARS = 2_000
-private const val MAX_EXCERPT_TOTAL_CHARS = 12_000
+// These bounds are the running cost of a lecture. A note update is sent roughly every 20
+// seconds, so every character here is paid for ~180 times an hour. The earlier ceilings
+// totalled 48,000 characters per call — around 12,000 tokens of input — which is what put a
+// measured lecture-hour at $0.18. They are sized to purpose now:
+//
+//   outline  – headings only, to place new content in the existing structure
+//   recent   – just enough tail to avoid repeating the sentence before it
+//   syllabus – topic context, never evidence, so a few short excerpts suffice
+private const val MAX_OUTLINE_CHARS = 2_000
+private const val MAX_RECENT_CHARS = 3_000
+private const val MAX_EXCERPTS = 3
+private const val MAX_EXCERPT_CHARS = 1_000
+private const val MAX_EXCERPT_TOTAL_CHARS = 3_000
 
 internal fun buildIncrementalNoteContext(
     title: String,

@@ -4,7 +4,11 @@ import me.thimmaiah.voxbox.notes.NoteAssetEntity
 import me.thimmaiah.voxbox.notes.NoteBlockEntity
 import me.thimmaiah.voxbox.notes.NoteBlockType
 import me.thimmaiah.voxbox.notes.NoteEntity
+import me.thimmaiah.voxbox.notes.TranscriptSegmentEntity
+import me.thimmaiah.voxbox.notes.formatClock
+import me.thimmaiah.voxbox.notes.renderCapturedMarkdown
 import me.thimmaiah.voxbox.notes.renderNoteMarkdown
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -67,5 +71,61 @@ class MarkdownExporterTest {
         assertFalse(markdown.contains("note-assets/"))
         assertTrue(markdown.contains("Diagram unavailable in this export: Free-body diagram"))
         assertTrue(markdown.contains("## Export warnings"))
+    }
+
+    // --- captured-evidence export -----------------------------------------------------
+
+    private fun segment(id: String, position: Int, speaker: String?, startMs: Long, text: String) =
+        TranscriptSegmentEntity(
+            id = id,
+            sessionId = "s1",
+            position = position,
+            speakerId = speaker,
+            startMs = startMs,
+            endMs = startMs + 4_000,
+            text = text,
+            isFinal = true,
+            createdAt = startMs,
+        )
+
+    @Test
+    fun capturedExportKeepsSpeechVerbatimWithTimingAndSpeakers() {
+        val note = NoteEntity("n1", "Algebra", 1, 2)
+        val transcript = listOf(
+            segment("t1", 0, "A", 0, "Both terms share a factor of three x."),
+            segment("t2", 1, "B", 65_000, "Does the bracket factorise again?"),
+            segment("t3", 2, null, 130_000, "  Leading and trailing space is trimmed.  "),
+        )
+
+        val captured = renderCapturedMarkdown(note, transcript, listOf("diagram-1.jpg"))
+
+        assertTrue(captured.startsWith("# Algebra — captured evidence"))
+        assertTrue(captured.contains("- `00:00` **A** — Both terms share a factor of three x."))
+        // A question from another speaker is part of the record and is never dropped here,
+        // whatever the refined note chose to do with it.
+        assertTrue(captured.contains("- `01:05` **B** — Does the bracket factorise again?"))
+        assertTrue(captured.contains("- `02:10` **?** — Leading and trailing space is trimmed."))
+        assertTrue(captured.contains("![Captured board](assets/diagram-1.jpg)"))
+        assertTrue(captured.contains("no AI rewriting"))
+        assertTrue(captured.contains("algebra.md"))
+    }
+
+    @Test
+    fun capturedExportOmitsSectionsItHasNoEvidenceFor() {
+        val note = NoteEntity("n1", "Algebra", 1, 2)
+
+        val captured = renderCapturedMarkdown(note, listOf(segment("t1", 0, "A", 0, "One line.")))
+
+        assertTrue(captured.contains("## Transcript"))
+        assertFalse(captured.contains("## Captured board images"))
+    }
+
+    @Test
+    fun clockFormattingCoversHourLongLectures() {
+        assertEquals("00:00", formatClock(0))
+        assertEquals("00:09", formatClock(9_400))
+        assertEquals("59:59", formatClock(3_599_000))
+        assertEquals("75:00", formatClock(4_500_000))
+        assertEquals("00:00", formatClock(-1))
     }
 }

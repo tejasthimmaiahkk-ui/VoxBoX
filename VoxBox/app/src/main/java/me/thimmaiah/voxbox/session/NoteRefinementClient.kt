@@ -61,7 +61,7 @@ data class NoteRefinementRequest(
     val transcriptSegments: List<TranscriptEvidence>,
     val boardEvidence: BoardNoteEvidence?,
     val responseMode: NoteRefinementResponseMode = NoteRefinementResponseMode.FULL,
-    val noteDetail: NoteDetail = NoteDetail.STANDARD,
+    val noteDetail: NoteDetail = NoteDetail.CONCISE,
     /** Optional free-text steer. The proxy ranks it below the evidence rules. */
     val customInstruction: String = "",
     val noteContext: IncrementalNoteContext? = null,

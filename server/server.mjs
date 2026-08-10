@@ -115,9 +115,13 @@ const MAX_CONTEXT_CHARS = 120_000;
 const MAX_SEGMENTS = 80;
 const MAX_SYLLABUS_EXCERPTS = 8;
 const MAX_SYLLABUS_EXCERPT_CHARS = 2_000;
-const MAX_FORWARDED_SYLLABUS_CHARS = 12_000;
-const MAX_NOTE_OUTLINE_CHARS = 12_000;
-const MAX_RECENT_MARKDOWN_CHARS = 24_000;
+// Hard ceilings on forwarded context, which is what a lecture actually costs: a note update
+// every ~20 seconds means each character here is billed ~180 times an hour. Set above the
+// app's own bounds so the app stays the tighter policy and this stays a backstop against any
+// client that asks for more.
+const MAX_FORWARDED_SYLLABUS_CHARS = 4_000;
+const MAX_NOTE_OUTLINE_CHARS = 4_000;
+const MAX_RECENT_MARKDOWN_CHARS = 6_000;
 const IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const AUDIO_MIME_TYPES = new Set([
   "audio/wav",
@@ -724,8 +728,10 @@ function validateNoteInput(body) {
   if (!Array.isArray(transcriptSegments) || transcriptSegments.length > MAX_SEGMENTS) {
     throw new RequestError(400, "invalid_request", `transcriptSegments must be a list of at most ${MAX_SEGMENTS} items.`);
   }
+  // Concise is the default because a real lecture segment is small: a trial run produced pages
+  // of expansion from a single rule, which cost money and buried the actual content.
   const noteDetail = body.noteDetail == null
-    ? "standard"
+    ? "concise"
     : requiredEnum(body.noteDetail, "noteDetail", ["concise", "standard", "detailed"]);
   // Free-text user steer. Bounded, and the instructions rank it below the evidence rules.
   const customInstruction = optionalString(body.customInstruction, "customInstruction", { max: 500 });
@@ -903,13 +909,39 @@ function parseNoteContent(text, request, { delta }) {
  */
 export function normalizeNoteMarkdown(markdown) {
   const display = (body) => "$$\n" + body.trim() + "\n$$";
-  return String(markdown)
+  // Environments that are a display equation in their own right. `aligned`, `cases`,
+  // `matrix` and friends are deliberately absent: those are only legal *inside* math
+  // mode, so wrapping them is what makes them render, not stripping them.
+  const displayEnvironments = "equation|align|alignat|gather|multline|eqnarray|displaymath|math";
+
+  const convert = (text) => text
     // \[ ... \]  ->  $$ ... $$
     .replace(/\\\[([\s\S]*?)\\\]/g, (_match, body) => display(body))
     // \( ... \)  ->  $ ... $
     .replace(/\\\(([\s\S]*?)\\\)/g, (_match, body) => "$" + body.trim() + "$")
-    // \begin{equation} ... \end{equation}  ->  $$ ... $$
-    .replace(/\\begin\{equation\*?\}([\s\S]*?)\\end\{equation\*?\}/g, (_match, body) => display(body));
+    // \begin{align} ... \end{align}  ->  $$ ... $$, starred forms included
+    .replace(
+      new RegExp(`\\\\begin\\{(?:${displayEnvironments})\\*?\\}([\\s\\S]*?)\\\\end\\{(?:${displayEnvironments})\\*?\\}`, "g"),
+      (_match, body) => display(body),
+    )
+    // A bare environment that is only valid inside math mode, emitted at top level.
+    // Left alone it renders as literal backslashes; wrapped, it renders correctly.
+    .replace(
+      /(^|\n)([ \t]*)(\\begin\{(?:aligned|cases|array|[bBpvV]?matrix|split)\}[\s\S]*?\\end\{(?:aligned|cases|array|[bBpvV]?matrix|split)\})/g,
+      (match, lead, indent, body, offset, whole) => {
+        // Skip when it is already inside a $$ block.
+        const before = whole.slice(0, offset);
+        if ((before.match(/\$\$/g) ?? []).length % 2 === 1) return match;
+        return `${lead}${indent}$$\n${body.trim()}\n$$`;
+      },
+    );
+
+  // Fenced code is verbatim by definition: a ``` block showing LaTeX source must survive
+  // untouched, so conversion runs only on the segments between fences.
+  return String(markdown)
+    .split(/(^```[\s\S]*?^```$|^~~~[\s\S]*?^~~~$)/m)
+    .map((part, index) => (index % 2 === 1 ? part : convert(part)))
+    .join("");
 }
 
 async function callBoardVision({ apiKey, imageBase64, mimeType, fetchImpl }) {
@@ -1033,10 +1065,13 @@ function providerNoteRequest(request) {
 
 /** How much the note should say for a given amount of evidence. */
 const NOTE_DETAIL_INSTRUCTION = {
-  concise: "Be brief. One short section per genuinely new idea, a few bullets at most. " +
-    "State the rule and one example, then stop. Do not add background the speaker did not give, " +
-    "and do not restate the same rule in different words.",
-  standard: "Keep it proportionate to the evidence: a small lecture segment should produce a small note.",
+  concise: "Be brief, and prefer adding nothing to padding. Twenty seconds of speech is usually one " +
+    "or two bullets, not a section. Add a heading only for a genuinely new topic. State the rule and, " +
+    "if the speaker gave one, a single example, then stop. No preamble, no summary of what you just " +
+    "wrote, no background the speaker did not give, and never the same rule twice in different words. " +
+    "If the evidence adds nothing new, return an empty delta.",
+  standard: "Keep it proportionate to the evidence: a small lecture segment should produce a small note. " +
+    "If the evidence adds nothing new, return an empty delta rather than restating what is already there.",
   detailed: "You may expand with derivations, extra worked examples and exam tips, but every addition " +
     "must still be traceable to the supplied evidence.",
 };
@@ -1085,7 +1120,9 @@ async function callNoteProvider({ apiKey, request, fetchImpl }) {
     kind: "note",
     schema: delta ? NOTE_DELTA_OUTPUT_SCHEMA : NOTE_PATCH_OUTPUT_SCHEMA,
     schemaName: delta ? "note_delta" : "note_patch",
-    maxTokens: delta ? 3_000 : 6_000,
+    // A delta is one lecture segment's worth of new text. The old 3,000-token ceiling let a
+    // single 20-second chunk bill for pages of expansion.
+    maxTokens: delta ? 1_200 : 6_000,
     timeoutMs: 55_000,
     messages: [
       { role: "system", content: noteInstructions(request) },

@@ -27,6 +27,17 @@ interface CaptureSessionDao {
     @Query("SELECT * FROM note_assets WHERE noteId = :noteId ORDER BY createdAt ASC")
     fun observeAssets(noteId: String): Flow<List<NoteAssetEntity>>
 
+    /** Every captured utterance behind a note, in lecture order, for the captured-evidence export. */
+    @Query(
+        """
+        SELECT t.* FROM transcript_segments t
+        INNER JOIN capture_sessions s ON s.id = t.sessionId
+        WHERE s.noteId = :noteId
+        ORDER BY s.startedAt ASC, t.position ASC
+        """,
+    )
+    suspend fun transcriptForNote(noteId: String): List<TranscriptSegmentEntity>
+
     @Query("SELECT * FROM capture_sessions WHERE id = :sessionId LIMIT 1")
     suspend fun getSession(sessionId: String): CaptureSessionEntity?
 

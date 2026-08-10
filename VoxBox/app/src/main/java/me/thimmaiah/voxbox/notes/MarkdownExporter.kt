@@ -12,8 +12,11 @@ import kotlinx.coroutines.withContext
 
 data class NoteExport(
     val markdownFile: File,
+    /** Verbatim capture, written only when the note has transcript evidence behind it. */
+    val capturedFile: File?,
     val zipFile: File,
     val assetCount: Int,
+    val capturedSegmentCount: Int,
 )
 
 class MarkdownExporter(
@@ -23,6 +26,7 @@ class MarkdownExporter(
         note: NoteEntity,
         blocks: List<NoteBlockEntity>,
         assets: List<NoteAssetEntity>,
+        transcript: List<TranscriptSegmentEntity> = emptyList(),
     ): NoteExport = withContext(Dispatchers.IO) {
         cleanupOldExports()
         val slug = safeExportName(note.title)
@@ -48,12 +52,27 @@ class MarkdownExporter(
         val markdownFile = File(exportDirectory, "$slug.md").apply {
             writeText(markdown, Charsets.UTF_8)
         }
+        // The refined note and the raw record ship as separate documents. Keeping them apart is
+        // the point: the refined file is what the AI wrote, the captured file is what was
+        // actually said and shown, and one can always be checked against the other.
+        val capturedFile = if (transcript.isEmpty()) null else {
+            File(exportDirectory, "$slug-captured.md").apply {
+                writeText(renderCapturedMarkdown(note, transcript, copiedAssets.map { it.second.name }), Charsets.UTF_8)
+            }
+        }
         val zipFile = File(context.cacheDir, "exports/$slug-${System.currentTimeMillis()}.zip")
         ZipOutputStream(FileOutputStream(zipFile)).use { zip ->
             addZipFile(zip, markdownFile, markdownFile.name)
+            capturedFile?.let { addZipFile(zip, it, it.name) }
             copiedAssets.forEach { (_, file) -> addZipFile(zip, file, "assets/${file.name}") }
         }
-        NoteExport(markdownFile, zipFile, copiedAssets.size)
+        NoteExport(
+            markdownFile = markdownFile,
+            capturedFile = capturedFile,
+            zipFile = zipFile,
+            assetCount = copiedAssets.size,
+            capturedSegmentCount = transcript.size,
+        )
     }
 
     private fun resolvePrivateAsset(relativePath: String): File {
@@ -116,6 +135,50 @@ internal fun renderNoteMarkdown(
         }
     }
     return sections.joinToString("\n\n").trim() + "\n"
+}
+
+/**
+ * The captured record: what was said and shown, with nothing written by a model.
+ *
+ * This is the other half of the evidence-preservation principle. The refined note can be
+ * argued with; this file is the thing it is argued against, so it carries timestamps and
+ * speaker labels and is never edited, summarised or reordered.
+ */
+internal fun renderCapturedMarkdown(
+    note: NoteEntity,
+    transcript: List<TranscriptSegmentEntity>,
+    assetFileNames: List<String> = emptyList(),
+): String {
+    val title = note.title.trim().ifBlank { "Untitled note" }
+    val sections = mutableListOf(
+        "# $title — captured evidence",
+        "> [!info] Verbatim record\n" +
+            "> Transcribed speech and captured board images exactly as recorded, with no AI rewriting.\n" +
+            "> Speaker labels are local to each 20-second chunk and are not identity claims.\n" +
+            "> The refined note is in `${safeExportName(note.title)}.md`.",
+    )
+
+    if (transcript.isNotEmpty()) {
+        val lines = transcript.map { segment ->
+            val speaker = segment.speakerId?.trim().orEmpty().ifBlank { "?" }
+            "- `${formatClock(segment.startMs)}` **$speaker** — ${segment.text.trim()}"
+        }
+        sections += "## Transcript\n\n" + lines.joinToString("\n")
+    }
+
+    if (assetFileNames.isNotEmpty()) {
+        sections += "## Captured board images\n\n" + assetFileNames.joinToString("\n\n") { name ->
+            "![Captured board](assets/$name)"
+        }
+    }
+    return sections.joinToString("\n\n").trim() + "\n"
+}
+
+internal fun formatClock(millis: Long): String {
+    val totalSeconds = (millis / 1_000).coerceAtLeast(0)
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return "%02d:%02d".format(minutes, seconds)
 }
 
 private val privateImageLink = Regex("!\\[([^]]*)]\\((?:\\./)?note-assets/[^)]+\\)")

@@ -17,6 +17,9 @@ interface CaptureSessionRepository {
     fun observeTranscript(sessionId: String): Flow<List<TranscriptSegmentEntity>>
     fun observeVisualEvidence(sessionId: String): Flow<List<VisualEvidenceEntity>>
     fun observeAssets(noteId: String): Flow<List<NoteAssetEntity>>
+
+    /** Every captured utterance behind a note, in lecture order, for the captured-evidence export. */
+    suspend fun transcriptForNote(noteId: String): List<TranscriptSegmentEntity>
     suspend fun createSession(settings: CaptureSessionSettings): CaptureSessionEntity
 
     /** Loads a session that is not the currently active one, for retained-audio recovery. */
@@ -66,6 +69,9 @@ class RoomCaptureSessionRepository(
         dao.observeVisualEvidence(sessionId)
 
     override fun observeAssets(noteId: String): Flow<List<NoteAssetEntity>> = dao.observeAssets(noteId)
+
+    override suspend fun transcriptForNote(noteId: String): List<TranscriptSegmentEntity> =
+        dao.transcriptForNote(noteId)
 
     override suspend fun createSession(settings: CaptureSessionSettings): CaptureSessionEntity {
         val now = clock()

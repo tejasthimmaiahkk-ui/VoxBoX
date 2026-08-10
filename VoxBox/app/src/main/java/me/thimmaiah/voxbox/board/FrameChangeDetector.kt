@@ -24,13 +24,28 @@ data class FrameChangeDecision(
  * Compares a tiny luminance sample instead of uploading every scheduled camera frame.
  * The score compensates for a global exposure shift so projector flicker or auto-exposure
  * is less likely to be mistaken for new board content.
+ *
+ * A frame that differs from the committed board state is not sent straight away. It has to
+ * *settle*: the next sample must look like the one that raised the change. This is what
+ * separates new board content from a person. Writing appears and stays, and a projector
+ * slide changes and stays, so both settle within one interval and are sent. A teacher
+ * walking past changes the frame and then keeps changing it, and the frame returns to the
+ * committed state once they leave, so nothing is ever uploaded. The cost is one extra
+ * sampling interval of latency; the saving is every frame a moving person would have sent.
  */
 class FrameChangeDetector(
     private val sampleSide: Int = 32,
     private val centeredPixelThreshold: Int = 22,
+    /**
+     * How still the scene has to be between two samples to count as settled. Deliberately
+     * well below any usable change threshold: chalk dust, hand tremor and sensor noise all
+     * have to pass, while a person who has moved on does not.
+     */
+    private val settleThreshold: Double = 0.035,
 ) {
     private var lastAcceptedLuma: IntArray? = null
     private var pendingCandidate: PendingFrameCandidate? = null
+    private var unsettledLuma: IntArray? = null
     private var nextCandidateToken = 1L
 
     fun evaluate(jpegBytes: ByteArray, threshold: Double): FrameChangeDecision {
@@ -54,24 +69,52 @@ class FrameChangeDetector(
             )
         }
         val metrics = compareLuma(previous, sample, centeredPixelThreshold)
-        val accepted = metrics.score >= threshold
-        return if (accepted) {
-            acceptedCandidate(
-                sample = sample,
-                accepted = true,
-                score = metrics.score,
-                fingerprint = fingerprint,
-                reason = "Meaningful board change detected.",
-            )
-        } else {
+        if (metrics.score < threshold) {
+            // Back at the committed state. Whatever raised the change has gone away again,
+            // which is exactly what a person walking through frame looks like.
+            unsettledLuma = null
             pendingCandidate = null
-            FrameChangeDecision(
+            return FrameChangeDecision(
                 accepted = false,
                 score = metrics.score,
                 fingerprint = fingerprint,
                 reason = "Frame is similar to the last committed board state.",
             )
         }
+
+        val awaiting = unsettledLuma
+        if (awaiting == null) {
+            unsettledLuma = sample.copyOf()
+            pendingCandidate = null
+            return FrameChangeDecision(
+                accepted = false,
+                score = metrics.score,
+                fingerprint = fingerprint,
+                reason = "Board changed; waiting for the next frame to confirm it has settled.",
+            )
+        }
+
+        val settling = compareLuma(awaiting, sample, centeredPixelThreshold)
+        if (settling.score >= settleThreshold) {
+            // Still moving between samples: someone is in front of the board, not new content.
+            unsettledLuma = sample.copyOf()
+            pendingCandidate = null
+            return FrameChangeDecision(
+                accepted = false,
+                score = metrics.score,
+                fingerprint = fingerprint,
+                reason = "Scene is still moving, so no board state is committed yet.",
+            )
+        }
+
+        unsettledLuma = null
+        return acceptedCandidate(
+            sample = sample,
+            accepted = true,
+            score = metrics.score,
+            fingerprint = fingerprint,
+            reason = "Settled board change detected.",
+        )
     }
 
     /** Commits the comparison baseline only after extraction and note persistence succeed. */
@@ -91,6 +134,7 @@ class FrameChangeDetector(
     fun reset() {
         lastAcceptedLuma = null
         pendingCandidate = null
+        unsettledLuma = null
         nextCandidateToken = 1L
     }
 

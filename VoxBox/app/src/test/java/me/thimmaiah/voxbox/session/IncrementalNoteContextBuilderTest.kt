@@ -15,9 +15,26 @@ class IncrementalNoteContextBuilderTest {
         assertEquals("Physics", first.title)
         assertTrue(first.outlineMarkdown.contains("# Mechanics"))
         assertTrue(first.outlineMarkdown.contains("## Force"))
-        assertEquals(24_000, first.recentMarkdown.length)
+        // The tail is deliberately small: it is re-sent on every note update, roughly 180 times
+        // an hour, so it only has to be long enough to avoid repeating the preceding sentence.
+        assertEquals(3_000, first.recentMarkdown.length)
         assertEquals(64, first.contentSha256.length)
         assertEquals(first.contentSha256, second.contentSha256)
+    }
+
+    @Test
+    fun forwardedContextStaysWithinAnAffordablePerCallBudget() {
+        val markdown = "# Mechanics\n" + (1..400).joinToString("\n") { "## Section $it\n" + "A".repeat(200) }
+        val syllabus = (1..40).joinToString("\n") { "# Topic $it\nForce acceleration momentum energy $it." }
+
+        val context = buildIncrementalNoteContext("Physics", markdown)
+        val excerpts = selectRelevantSyllabusExcerpts(syllabus, "force acceleration momentum")
+        val total = context.outlineMarkdown.length +
+            context.recentMarkdown.length +
+            excerpts.sumOf { it.text.length }
+
+        // Was ~48,000 characters per call, which is what made a lecture-hour cost $0.18.
+        assertTrue("forwarded context was $total characters", total <= 8_000)
     }
 
     @Test

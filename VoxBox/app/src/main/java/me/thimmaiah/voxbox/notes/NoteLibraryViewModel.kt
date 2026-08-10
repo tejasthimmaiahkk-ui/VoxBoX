@@ -132,11 +132,18 @@ class NoteLibraryViewModel(application: Application) : AndroidViewModel(applicat
         viewModelScope.launch {
             try {
                 val assets = sessionRepository.observeAssets(note.id).first()
-                val export = markdownExporter.export(note, blocks, assets)
+                val transcript = sessionRepository.transcriptForNote(note.id)
+                val export = markdownExporter.export(note, blocks, assets, transcript)
                 _uiState.value = _uiState.value.copy(
                     exportZipPath = export.zipFile.absolutePath,
                     exportAssetCount = export.assetCount,
-                    status = "Obsidian-ready export created with ${export.assetCount} diagram assets.",
+                    status = buildString {
+                        append("Export created: refined note")
+                        if (export.capturedFile != null) {
+                            append(" plus captured evidence (${export.capturedSegmentCount} segments)")
+                        }
+                        append(", ${export.assetCount} diagram assets.")
+                    },
                 )
             } catch (error: Exception) {
                 _uiState.value = _uiState.value.copy(
