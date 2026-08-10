@@ -28,3 +28,4 @@ desktop.ini
 # Local artifact inspection output (final PPTX remains tracked)
 outputs/*.inspect.ndjson
 outputs/review1-render/
+outputs/redesign-device/
