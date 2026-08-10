@@ -1,6 +1,7 @@
 package me.thimmaiah.voxbox.library
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -34,15 +35,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import me.thimmaiah.voxbox.notes.FolderEntity
 import me.thimmaiah.voxbox.notes.NoteEntity
 import me.thimmaiah.voxbox.notes.NoteLibraryViewModel
 import me.thimmaiah.voxbox.ui.VbCard
 import me.thimmaiah.voxbox.ui.VbEmptyState
 import me.thimmaiah.voxbox.ui.VbEyebrow
+import me.thimmaiah.voxbox.ui.VbIconButton
 import me.thimmaiah.voxbox.ui.VbIcons
 import me.thimmaiah.voxbox.ui.VbInitial
 import me.thimmaiah.voxbox.ui.VbOutlineButton
@@ -62,6 +66,8 @@ fun LibraryScreen(
     var actionsFor by remember { mutableStateOf<NoteEntity?>(null) }
     var renaming by remember { mutableStateOf<NoteEntity?>(null) }
     var deleting by remember { mutableStateOf<NoteEntity?>(null) }
+    var creatingFolder by remember { mutableStateOf(false) }
+    var movingNote by remember { mutableStateOf<NoteEntity?>(null) }
 
     Column(
         Modifier
@@ -94,24 +100,71 @@ fun LibraryScreen(
             modifier = Modifier.fillMaxWidth(),
         )
 
-        if (state.folders.isNotEmpty()) {
-            Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(12.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .weight(1f)
+                    .horizontalScroll(rememberScrollState()),
             ) {
-                VbSegmented(
-                    options = listOf<String?>(null) + state.folders.map { it.id },
-                    selected = state.selectedFolderId,
-                    label = { id ->
-                        if (id == null) "All" else state.folders.firstOrNull { it.id == id }?.name ?: "Folder"
-                    },
-                    onSelect = viewModel::selectFolder,
-                )
+                Crumb("All notes", active = state.selectedFolderId == null) { viewModel.selectFolder(null) }
+                state.folderPath.forEachIndexed { index, folder ->
+                    Icon(
+                        painter = painterResource(VbIcons.ChevronRight),
+                        contentDescription = null,
+                        tint = LocalVbStatus.current.fg3,
+                        modifier = Modifier.size(14.dp),
+                    )
+                    Crumb(label = folder.name, active = index == state.folderPath.lastIndex) {
+                        viewModel.selectFolder(folder.id)
+                    }
+                }
             }
+            VbIconButton(VbIcons.Plus, "New folder", { creatingFolder = true })
         }
 
-        Spacer(Modifier.height(VbSpace.section))
+        Spacer(Modifier.height(VbSpace.gap))
+
+        val subfolders = state.visibleFolders
+        if (subfolders.isNotEmpty()) {
+            Column(verticalArrangement = Arrangement.spacedBy(VbSpace.gap)) {
+                subfolders.forEach { folder ->
+                    val count = state.noteLocations.count { it.folderId == folder.id }
+                    VbCard(onClick = { viewModel.selectFolder(folder.id) }, modifier = Modifier.fillMaxWidth()) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                painter = painterResource(VbIcons.Folder),
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(22.dp),
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    text = folder.name,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                                Text(
+                                    text = if (count == 1) "1 note" else "$count notes",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = LocalVbStatus.current.fg2,
+                                )
+                            }
+                            Icon(
+                                painter = painterResource(VbIcons.ChevronRight),
+                                contentDescription = null,
+                                tint = LocalVbStatus.current.fg3,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(VbSpace.section))
+        }
 
         if (notes.isEmpty()) {
             VbEmptyState(
@@ -152,6 +205,67 @@ fun LibraryScreen(
                 }
             }
         }
+    }
+
+    // Rendered outside the Column so a sheet or dialog is never clipped by the list.
+    actionsFor?.let { note ->
+        NoteActionsSheet(
+            note = note,
+            onRename = {
+                actionsFor = null
+                renaming = note
+            },
+            onMove = {
+                actionsFor = null
+                movingNote = note
+            },
+            onDelete = {
+                actionsFor = null
+                deleting = note
+            },
+            onDismiss = { actionsFor = null },
+        )
+    }
+    renaming?.let { note ->
+        RenameDialog(
+            note = note,
+            onRename = { title ->
+                viewModel.renameNote(note.id, title)
+                renaming = null
+            },
+            onDismiss = { renaming = null },
+        )
+    }
+    deleting?.let { note ->
+        DeleteDialog(
+            note = note,
+            onDelete = {
+                viewModel.deleteNote(note.id)
+                deleting = null
+            },
+            onDismiss = { deleting = null },
+        )
+    }
+    if (creatingFolder) {
+        CreateFolderDialog(
+            parentName = state.folderPath.lastOrNull()?.name,
+            onCreate = { name ->
+                viewModel.createFolder(name, state.selectedFolderId)
+                creatingFolder = false
+            },
+            onDismiss = { creatingFolder = false },
+        )
+    }
+    movingNote?.let { note ->
+        MoveNoteSheet(
+            note = note,
+            folders = state.folders,
+            onMove = { folderId ->
+                viewModel.moveNoteToFolder(note.id, folderId)
+                movingNote = null
+            },
+            onDismiss = { movingNote = null },
+        )
     }
 }
 
@@ -198,6 +312,7 @@ private fun NoteRow(note: NoteEntity, onClick: () -> Unit, onLongClick: () -> Un
 private fun NoteActionsSheet(
     note: NoteEntity,
     onRename: () -> Unit,
+    onMove: () -> Unit,
     onDelete: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -212,6 +327,8 @@ private fun NoteActionsSheet(
             )
             Spacer(Modifier.height(16.dp))
             VbOutlineButton("Rename", onClick = onRename, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(10.dp))
+            VbOutlineButton("Move to folder", onClick = onMove, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(10.dp))
             VbOutlineButton(
                 text = "Delete",
@@ -271,4 +388,110 @@ private fun DeleteDialog(note: NoteEntity, onDelete: () -> Unit, onDismiss: () -
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Keep") } },
     )
+}
+
+@Composable
+private fun Crumb(label: String, active: Boolean, onClick: () -> Unit) {
+    Text(
+        text = label,
+        style = MaterialTheme.typography.labelLarge,
+        color = if (active) MaterialTheme.colorScheme.onBackground else MaterialTheme.colorScheme.primary,
+        maxLines = 1,
+        modifier = Modifier
+            .clip(VbShape.pill)
+            .clickable(enabled = !active, onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+    )
+}
+
+@Composable
+private fun CreateFolderDialog(parentName: String?, onCreate: (String) -> Unit, onDismiss: () -> Unit) {
+    var name by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (parentName == null) "New folder" else "New folder in " + parentName) },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                placeholder = { Text("Folder name") },
+                singleLine = true,
+                shape = VbShape.pill,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = {
+            TextButton(enabled = name.isNotBlank(), onClick = { onCreate(name) }) { Text("Create") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/**
+ * Every folder with its full path, so two units both called "Unit 1" stay distinguishable.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MoveNoteSheet(
+    note: NoteEntity,
+    folders: List<FolderEntity>,
+    onMove: (String?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val byId = folders.associateBy { it.id }
+    fun path(folder: FolderEntity): String {
+        val parts = mutableListOf(folder.name)
+        var parent = folder.parentId?.let(byId::get)
+        while (parent != null) {
+            parts.add(0, parent.name)
+            parent = parent.parentId?.let(byId::get)
+        }
+        return parts.joinToString(" / ")
+    }
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(),
+        shape = VbShape.sheet,
+    ) {
+        Column(Modifier.padding(horizontal = VbSpace.screenH, vertical = 8.dp)) {
+            VbEyebrow("Move to")
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = note.title.ifBlank { "Untitled note" },
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(12.dp))
+            Text(
+                text = "All notes",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onMove(null) }
+                    .padding(vertical = 12.dp),
+            )
+            folders.sortedBy { path(it) }.forEach { folder ->
+                Text(
+                    text = path(folder),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onMove(folder.id) }
+                        .padding(vertical = 12.dp),
+                )
+            }
+            if (folders.isEmpty()) {
+                Text(
+                    text = "No folders yet. Create one with the + button.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = LocalVbStatus.current.fg2,
+                )
+            }
+            Spacer(Modifier.height(24.dp))
+        }
+    }
 }

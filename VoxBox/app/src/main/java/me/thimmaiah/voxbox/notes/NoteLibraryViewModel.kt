@@ -32,14 +32,33 @@ data class NoteLibraryUiState(
     val totalNoteCount: Int
         get() = allNotes.size
 
+    /** Subfolders of whatever folder is open. */
+    val visibleFolders: List<FolderEntity>
+        get() = folders.filter { it.parentId == selectedFolderId }
+
+    /**
+     * Notes in the open folder. At the root that means notes filed nowhere, so a note is listed
+     * in exactly one place rather than appearing again at the top level after being filed.
+     */
     val visibleNotes: List<NoteEntity>
         get() {
-            val folderId = selectedFolderId ?: return notes
-            val noteIds = noteLocations.asSequence()
-                .filter { it.folderId == folderId }
-                .map(NoteLocationEntity::noteId)
-                .toSet()
-            return notes.filter { it.id in noteIds }
+            val filedIds = noteLocations.associate { it.noteId to it.folderId }
+            val folderId = selectedFolderId
+                ?: return notes.filter { filedIds[it.id] == null }
+            return notes.filter { filedIds[it.id] == folderId }
+        }
+
+    /** Root-to-current path, for the breadcrumb. */
+    val folderPath: List<FolderEntity>
+        get() {
+            val byId = folders.associateBy { it.id }
+            val path = mutableListOf<FolderEntity>()
+            var current = selectedFolderId?.let(byId::get)
+            while (current != null) {
+                path.add(0, current)
+                current = current.parentId?.let(byId::get)
+            }
+            return path
         }
 }
 
@@ -111,6 +130,28 @@ class NoteLibraryViewModel(application: Application) : AndroidViewModel(applicat
         _uiState.value = _uiState.value.copy(
             selectedFolderId = folderId?.takeIf { id -> _uiState.value.folders.any { it.id == id } },
         )
+    }
+
+    /** Creates a folder inside the one currently open, so nesting follows where you are. */
+    fun createFolder(name: String, parentId: String?) {
+        val clean = name.trim().take(60)
+        if (clean.isEmpty()) return
+        viewModelScope.launch {
+            libraryRepository.createFolder(clean, parentId)
+            _uiState.value = _uiState.value.copy(status = "Folder created.")
+        }
+    }
+
+    fun moveNoteToFolder(noteId: String, folderId: String?) {
+        viewModelScope.launch {
+            if (folderId == null) {
+                libraryRepository.removeNoteFromFolder(noteId)
+                _uiState.value = _uiState.value.copy(status = "Moved out of its folder.")
+            } else {
+                libraryRepository.placeNote(noteId, folderId)
+                _uiState.value = _uiState.value.copy(status = "Moved.")
+            }
+        }
     }
 
     fun openNote(noteId: String) {

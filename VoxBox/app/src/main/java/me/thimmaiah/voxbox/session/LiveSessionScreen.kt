@@ -100,9 +100,11 @@ fun LiveSessionScreen(
 
     BackHandler(enabled = state.isActive) { confirmingExit = true }
 
-    // Once the session has stopped and the note has been written, hand over to the reader.
-    LaunchedEffect(state.stage) {
-        if (state.stage == LiveCaptureStage.STOPPED) onFinished(state.activeNoteId)
+    // Hand over to the reader only once the end-of-session check has finished. Leaving as soon
+    // as the stage flips meant the check ran against a screen nobody was looking at, and its
+    // result appeared later with no explanation of where it came from.
+    LaunchedEffect(state.stage, state.verifying) {
+        if (state.stage == LiveCaptureStage.STOPPED && !state.verifying) onFinished(state.activeNoteId)
     }
 
     Box(
@@ -144,10 +146,10 @@ fun LiveSessionScreen(
 
             Spacer(Modifier.height(12.dp))
             VbPrimaryButton(
-                text = if (state.stage == LiveCaptureStage.STOPPING) {
-                    "Finishing note…"
-                } else {
-                    "Stop and finish note"
+                text = when {
+                    state.verifying -> "Checking formulas and concepts…"
+                    state.stage == LiveCaptureStage.STOPPING -> "Finishing note…"
+                    else -> "Stop and finish note"
                 },
                 onClick = { viewModel.stopSession() },
                 enabled = state.stage == LiveCaptureStage.RUNNING,

@@ -187,6 +187,9 @@ class CaptureSessionViewModel(
     /** Last chunk's final utterance, used to remove the overlap the next chunk repeats. */
     private var lastTranscribedTail: String = ""
 
+    /** Board fingerprints already committed this session, so one board is never cropped twice. */
+    private val committedFrameFingerprints = synchronizedSetOf()
+
     private var latestPersistedTranscriptIds: Set<String> = emptySet()
     private val noteUpdateMutex = Mutex()
     private val trackedFrameFiles = synchronizedSetOf()
@@ -328,6 +331,7 @@ class CaptureSessionViewModel(
                 frameChangeDetector.reset()
                 // A new lecture shares no seam with the last one.
                 lastTranscribedTail = ""
+                committedFrameFingerprints.clear()
                 speakerTracker = PerChunkSpeakerTracker()
                 latestPersistedTranscriptIds = emptySet()
                 _uiState.update {
@@ -695,6 +699,21 @@ class CaptureSessionViewModel(
                 it.copy(
                     skippedFrames = it.skippedFrames + 1,
                     status = "Similar frame skipped locally; no API or note work used.",
+                )
+            }
+            return
+        }
+        // Two captures of an unchanged board produced two identical crops with identical
+        // captions, because the only duplicate check compared generated file names. Compare the
+        // frame instead: the detector already fingerprints every one it accepts.
+        if (!committedFrameFingerprints.add(decision.fingerprint)) {
+            VbDebugLog.log("frame", "duplicate board state ${decision.fingerprint}; crop not stored")
+            deleteTrackedFrame(file)
+            frameChangeDetector.discard(decision)
+            _uiState.update {
+                it.copy(
+                    skippedFrames = it.skippedFrames + 1,
+                    status = "This board state was already captured; no duplicate crop was saved.",
                 )
             }
             return
@@ -1293,9 +1312,17 @@ class CaptureSessionViewModel(
      */
     private fun verifyFinishedNote() {
         val state = _uiState.value
-        val session = state.activeSession ?: return
+        val session = state.activeSession
+        if (session == null) {
+            VbDebugLog.log("verify", "skipped: no active session")
+            return
+        }
         val markdown = state.generatedMarkdown
-        if (markdown.isBlank()) return
+        if (markdown.isBlank()) {
+            VbDebugLog.log("verify", "skipped: the note is empty")
+            return
+        }
+        VbDebugLog.log("verify", "starting, noteChars=${markdown.length} revision=${state.revision}")
         viewModelScope.launch {
             _uiState.update { it.copy(verifying = true, status = "Checking formulas and concepts…") }
             try {
@@ -1304,6 +1331,12 @@ class CaptureSessionViewModel(
                     requestId = "verify-${session.id}",
                     noteMarkdown = markdown,
                     subjectHint = state.notes.firstOrNull { it.id == state.activeNoteId }?.title.orEmpty(),
+                )
+                VbDebugLog.log(
+                    "verify",
+                    "returned findings=${verification.findings.size} " +
+                        "formulas=${verification.checkedFormulas.size} " +
+                        "concepts=${verification.checkedConcepts.size}",
                 )
                 _uiState.update { it.copy(verification = verification, verifying = false) }
                 if (verification.findings.isEmpty()) {
@@ -1341,6 +1374,7 @@ class CaptureSessionViewModel(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
+                VbDebugLog.log("verify", "FAILED ${error::class.simpleName}: ${error.message}")
                 recordServiceFailure((error as? NoteVerificationException)?.failure)
                 _uiState.update { it.copy(verifying = false) }
                 appendWarning("The end-of-session check did not run: ${error.message}")
