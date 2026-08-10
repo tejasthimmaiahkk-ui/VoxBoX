@@ -87,4 +87,34 @@ class NoteRefinementParserTest {
         assertTrue(error is NoteRefinementException)
         assertTrue(error?.message.orEmpty().contains("hash"))
     }
+
+    @Test
+    fun anEmptyDeltaIsAcceptedAndLeavesTheNoteUnchanged() {
+        // The concise detail level asks the model to return an empty delta when a twenty-second
+        // chunk adds nothing. Treating that as a failure showed "AI refinement was unavailable"
+        // during a live session for a response that was correct.
+        val json = """
+            {
+              "requestId": "r1",
+              "sessionId": "s1",
+              "baseRevision": 3,
+              "nextRevision": 4,
+              "title": "Algebra",
+              "updateMode": "delta",
+              "baseContentSha256": "${"a".repeat(64)}",
+              "markdownDelta": "",
+              "corrections": [],
+              "consumedEvidenceIds": [],
+              "warnings": [],
+              "source": "openrouter"
+            }
+        """.trimIndent()
+
+        val refinement = parseNoteRefinementResponse(json)
+
+        val existing = "# Algebra\n\nExisting body."
+
+        assertEquals("", refinement.markdownDelta)
+        assertEquals(existing, refinement.materializeMarkdown(existing))
+    }
 }

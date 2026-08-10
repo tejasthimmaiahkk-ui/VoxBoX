@@ -51,6 +51,7 @@ import me.thimmaiah.voxbox.ui.VbEyebrow
 import me.thimmaiah.voxbox.ui.VbIconButton
 import me.thimmaiah.voxbox.ui.VbIcons
 import me.thimmaiah.voxbox.ui.VbInitial
+import me.thimmaiah.voxbox.ui.VbNotice
 import me.thimmaiah.voxbox.ui.VbSegmented
 import me.thimmaiah.voxbox.ui.vbBlockEnter
 import me.thimmaiah.voxbox.ui.vbLoop
@@ -113,6 +114,20 @@ fun HomeScreen(
                 },
                 onOptions = onOpenCapture,
             )
+        }
+
+        // A flag is a decision the student still owes the note. Surfacing the count on Home is
+        // the only place it competes with nothing else for attention.
+        val flagged = library.activeBlocks.count { it.content.contains("voxbox-review:start") }
+        if (flagged > 0) {
+            Block(visible, 2) {
+                Spacer(Modifier.height(20.dp))
+                VbNotice(
+                    title = "$flagged note section needs your review",
+                    body = "The AI disagreed with something that was captured. Nothing was changed.",
+                    tone = LocalVbStatus.current.review,
+                )
+            }
         }
 
         val recent = library.allNotes.take(2)

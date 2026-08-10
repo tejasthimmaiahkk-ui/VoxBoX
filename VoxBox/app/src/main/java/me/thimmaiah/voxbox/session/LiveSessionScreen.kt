@@ -63,6 +63,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.thimmaiah.voxbox.camera.VbCameraController
+import me.thimmaiah.voxbox.reader.parseNoteForReview
 import me.thimmaiah.voxbox.ui.VbPill
 import me.thimmaiah.voxbox.ui.VbPrimaryButton
 import me.thimmaiah.voxbox.ui.vbLoop
@@ -483,11 +484,22 @@ private fun LivingNotePanel(
         Spacer(Modifier.height(10.dp))
         LazyColumn(state = listState, modifier = Modifier.weight(1f)) {
             item {
+                // Strip the review section: its HTML markers and "Suggested:" lines are for the
+                // reader to render as decisions, and shown raw they read as lecture content.
+                val parsed = parseNoteForReview(markdown)
                 Text(
-                    text = markdown.ifBlank { "The note starts filling in after the first chunk." },
+                    text = parsed.body.ifBlank { "The note starts filling in after the first chunk." },
                     style = MaterialTheme.typography.bodyMedium,
                     color = VbLiveFgBody,
                 )
+                if (parsed.flags.isNotEmpty() || parsed.warnings.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        text = "${parsed.flags.size + parsed.warnings.size} item(s) to review after the session",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = VbLiveFg2,
+                    )
+                }
                 Spacer(Modifier.height(14.dp))
                 Box(Modifier.fillMaxWidth().height(1.dp).background(VbLiveLine))
                 Spacer(Modifier.height(10.dp))

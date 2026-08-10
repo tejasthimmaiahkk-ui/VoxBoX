@@ -266,9 +266,11 @@ internal fun parseNoteRefinementResponse(
         }
         NoteRefinementUpdateMode.DELTA -> {
             markdown = ""
+            // A blank delta means "this chunk added nothing worth writing", which the concise
+            // detail level asks for outright. Rejecting it surfaced as "AI refinement was
+            // unavailable" mid-lecture for a response that was entirely correct.
             markdownDelta = root.requiredString("markdownDelta")
             baseContentSha256 = root.requiredString("baseContentSha256")
-            if (markdownDelta.isBlank()) throw NoteRefinementException("The note delta is empty.")
             if (!SHA256_PATTERN.matches(baseContentSha256)) {
                 throw NoteRefinementException("The note delta has an invalid base content hash.")
             }

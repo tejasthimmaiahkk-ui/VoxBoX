@@ -190,12 +190,10 @@ fun NoteReaderScreen(
         ) {
             itemsIndexed(blocks, key = { _, block -> block.id }) { _, block ->
                 val parsed = parseNoteForReview(block.content)
+                val diagrams = findDiagramLinks(parsed.body)
+                val prose = if (diagrams.isEmpty()) parsed.body else withoutDiagramLinks(parsed.body)
                 ReaderBlock(
-                    block = if (parsed.flags.isEmpty() && parsed.warnings.isEmpty()) {
-                        block
-                    } else {
-                        block.copy(content = parsed.body)
-                    },
+                    block = if (prose == block.content) block else block.copy(content = prose),
                     query = query,
                     bodyStyle = bodyStyle,
                     onEdit = {
@@ -203,6 +201,7 @@ fun NoteReaderScreen(
                         sheet = Sheet.EDIT
                     },
                 )
+                diagrams.forEach { link -> DiagramBlock(link) }
                 parsed.warnings.forEach { warning ->
                     Text(
                         text = warning,

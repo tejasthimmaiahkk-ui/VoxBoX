@@ -113,12 +113,28 @@ fun LibraryScreen(
                 verticalArrangement = Arrangement.spacedBy(VbSpace.gap),
                 contentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding() + 24.dp),
             ) {
-                item {
-                    VbEyebrow("${notes.size} note${if (notes.size == 1) "" else "s"}")
-                    Spacer(Modifier.height(8.dp))
+                // Grouped by recency rather than listed flat: the note you want is almost
+                // always one from this week, and a date under every row reads as noise.
+                val weekAgo = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000
+                val (thisWeek, earlier) = notes.partition { it.updatedAt >= weekAgo }
+                if (thisWeek.isNotEmpty()) {
+                    item(key = "eyebrow-week") {
+                        VbEyebrow("This week")
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    items(thisWeek, key = { it.id }) { note ->
+                        NoteRow(note) { onOpenNote(note.id) }
+                    }
                 }
-                items(notes, key = { it.id }) { note ->
-                    NoteRow(note) { onOpenNote(note.id) }
+                if (earlier.isNotEmpty()) {
+                    item(key = "eyebrow-earlier") {
+                        Spacer(Modifier.height(10.dp))
+                        VbEyebrow("Earlier")
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    items(earlier, key = { it.id }) { note ->
+                        NoteRow(note) { onOpenNote(note.id) }
+                    }
                 }
             }
         }
