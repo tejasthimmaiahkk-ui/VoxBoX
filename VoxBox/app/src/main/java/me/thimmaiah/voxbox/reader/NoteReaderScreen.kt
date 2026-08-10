@@ -45,6 +45,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
@@ -66,6 +67,7 @@ import me.thimmaiah.voxbox.ui.VbOutlineButton
 import me.thimmaiah.voxbox.ui.VbPrimaryButton
 import me.thimmaiah.voxbox.ui.VbSegmented
 import me.thimmaiah.voxbox.ui.VbSwitchRow
+import me.thimmaiah.voxbox.ui.shareFile
 import me.thimmaiah.voxbox.ui.theme.LocalVbStatus
 import me.thimmaiah.voxbox.ui.theme.VbMono
 import me.thimmaiah.voxbox.ui.theme.VbReadingSize
@@ -101,6 +103,18 @@ fun NoteReaderScreen(
     var focus by remember { mutableStateOf(false) }
 
     LaunchedEffect(noteId) { viewModel.openNote(noteId) }
+
+    // The export used to stop here: a zip was built and its path recorded, and nothing ever
+    // turned that into an intent, so the button looked broken. Hand it straight to the system.
+    val context = LocalContext.current
+    var exporting by remember { mutableStateOf(false) }
+    LaunchedEffect(state.exportZipPath) {
+        val path = state.exportZipPath ?: return@LaunchedEffect
+        shareFile(context, java.io.File(path), "application/zip", "VoxBox note export")
+        viewModel.consumeExport()
+        exporting = false
+        sheet = Sheet.NONE
+    }
 
     // Evidence quoting needs the transcript, which is not part of the note's blocks.
     var evidence by remember { mutableStateOf<List<TranscriptSegmentEntity>>(emptyList()) }
@@ -192,10 +206,10 @@ fun NoteReaderScreen(
                 val parsed = parseNoteForReview(block.content)
                 val diagrams = findDiagramLinks(parsed.body)
                 val prose = if (diagrams.isEmpty()) parsed.body else withoutDiagramLinks(parsed.body)
-                ReaderBlock(
-                    block = if (prose == block.content) block else block.copy(content = prose),
-                    query = query,
+                MarkdownBody(
+                    markdown = prose,
                     bodyStyle = bodyStyle,
+                    query = query,
                     onEdit = {
                         viewModel.startEditing(block)
                         sheet = Sheet.EDIT
@@ -312,11 +326,12 @@ fun NoteReaderScreen(
                 VbEyebrow("Share")
                 Spacer(Modifier.height(12.dp))
                 VbPrimaryButton(
-                    text = "Export note and evidence",
+                    text = if (exporting) "Preparing…" else "Export note and evidence",
                     onClick = {
+                        exporting = true
                         viewModel.exportActiveNote()
-                        sheet = Sheet.NONE
                     },
+                    enabled = !exporting,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(10.dp))
@@ -383,108 +398,5 @@ fun NoteReaderScreen(
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun ReaderBlock(
-    block: NoteBlockEntity,
-    query: String,
-    bodyStyle: androidx.compose.ui.text.TextStyle,
-    onEdit: () -> Unit,
-) {
-    val status = LocalVbStatus.current
-    when (block.type) {
-        NoteBlockType.HEADING.name -> {
-            Spacer(Modifier.height(18.dp))
-            Text(
-                text = block.content,
-                style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.clickable(onClick = onEdit),
-            )
-            Spacer(Modifier.height(6.dp))
-        }
-
-        NoteBlockType.BULLET_POINT.name -> Row(Modifier.padding(vertical = 4.dp)) {
-            Box(
-                Modifier
-                    .padding(top = 9.dp)
-                    .size(5.dp)
-                    .clip(VbShape.pill)
-                    .background(MaterialTheme.colorScheme.primary),
-            )
-            Spacer(Modifier.width(10.dp))
-            Text(
-                text = highlighted(block.content, query),
-                style = bodyStyle,
-                color = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.clickable(onClick = onEdit),
-            )
-        }
-
-        // Code and formulas scroll rather than wrap: a wrapped equation is a wrong equation.
-        NoteBlockType.PIE_CHART.name -> Column(Modifier.padding(vertical = 8.dp)) {
-            Text(
-                text = "${block.label.orEmpty()}: ${block.chartValue ?: 0}%",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onBackground,
-            )
-        }
-
-        else -> {
-            val looksLikeMath = block.content.trimStart().startsWith("$$") ||
-                block.content.trimStart().startsWith("```")
-            if (looksLikeMath) {
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp)
-                        .clip(VbShape.media)
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .horizontalScroll(rememberScrollState())
-                        .padding(14.dp),
-                ) {
-                    Text(
-                        text = block.content,
-                        style = MaterialTheme.typography.bodyMedium.copy(fontFamily = VbMono),
-                        color = MaterialTheme.colorScheme.primary,
-                        softWrap = false,
-                    )
-                }
-            } else {
-                Text(
-                    text = highlighted(block.content, query),
-                    style = bodyStyle,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    modifier = Modifier
-                        .padding(vertical = 6.dp)
-                        .clickable(onClick = onEdit),
-                )
-            }
-        }
-    }
-}
-
-/** Marks find matches without altering the underlying text. */
-@Composable
-private fun highlighted(text: String, query: String) = buildAnnotatedString {
-    if (query.isBlank()) {
-        append(text)
-        return@buildAnnotatedString
-    }
-    val tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.26f)
-    var index = 0
-    while (index < text.length) {
-        val hit = text.indexOf(query, index, ignoreCase = true)
-        if (hit < 0) {
-            append(text.substring(index))
-            break
-        }
-        append(text.substring(index, hit))
-        withStyle(SpanStyle(background = tint)) {
-            append(text.substring(hit, hit + query.length))
-        }
-        index = hit + query.length
     }
 }

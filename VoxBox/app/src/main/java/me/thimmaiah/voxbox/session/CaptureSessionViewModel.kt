@@ -31,6 +31,7 @@ import me.thimmaiah.voxbox.audio.AudioTranscriptionClient
 import me.thimmaiah.voxbox.audio.AudioTranscriptionException
 import me.thimmaiah.voxbox.audio.HttpAudioTranscriptionClient
 import me.thimmaiah.voxbox.audio.PerChunkSpeakerTracker
+import me.thimmaiah.voxbox.debug.VbDebugLog
 import me.thimmaiah.voxbox.audio.PcmAudioChunkRecorder
 import me.thimmaiah.voxbox.audio.RecordedAudioChunk
 import me.thimmaiah.voxbox.audio.SpeakerFocusSnapshot
@@ -588,6 +589,18 @@ class CaptureSessionViewModel(
             )
             return
         }
+        VbDebugLog.log(
+            "transcribe",
+            "chunk offset=${chunk.offsetMs} durationMs=${chunk.durationMs} " +
+                "segments=${transcription.segments.size} bytes=${wavBytes.size}",
+        )
+        transcription.segments.forEachIndexed { index, segment ->
+            VbDebugLog.logText(
+                "transcribe",
+                "seg[$index] ${segment.startMs}-${segment.endMs} speaker=${segment.speakerId}",
+                segment.text,
+            )
+        }
         if (transcription.segments.isEmpty()) {
             deleteRecoveredAudio(chunk)
             persistOperationalWarning("No clear speech was found in the audio chunk at ${formatTimestamp(chunk.offsetMs)}.")
@@ -644,6 +657,11 @@ class CaptureSessionViewModel(
         val session = state.activeSession ?: return deleteTrackedFrame(file)
         val bytes = file.readBytes()
         val decision = frameChangeDetector.evaluate(bytes, state.changeThreshold)
+        VbDebugLog.log(
+            "frame",
+            "accepted=${decision.accepted} score=${"%.4f".format(decision.score)} " +
+                "threshold=${state.changeThreshold} fp=${decision.fingerprint} reason=${decision.reason}",
+        )
         _uiState.update { it.copy(lastFrameChangeScore = decision.score) }
         if (!decision.accepted) {
             deleteTrackedFrame(file)
@@ -811,6 +829,12 @@ class CaptureSessionViewModel(
                     ),
                 )
             } catch (error: Exception) {
+                VbDebugLog.log(
+                    "refine",
+                    "FAILED ${error::class.simpleName}: ${error.message} " +
+                        "(segments=${transcriptEvidence.size} board=${boardEvidence != null} " +
+                        "detail=${state.noteDetail} revision=${state.revision})",
+                )
                 appendWarning(
                     "AI refinement was unavailable; captured evidence was appended without silent correction (${error.message}).",
                 )

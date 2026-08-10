@@ -9,6 +9,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import me.thimmaiah.voxbox.data.SettingsRepository
+import me.thimmaiah.voxbox.debug.VbDebugLog
 import me.thimmaiah.voxbox.data.VbSettings
 import me.thimmaiah.voxbox.data.VbThemeMode
 import me.thimmaiah.voxbox.ui.VoxBoxApp
@@ -18,6 +19,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // TEMPORARY. Off in release so an accidental ship cannot accumulate diagnostics.
+        // See docs/TEMPORARY_DEBUG_LOG.md.
+        VbDebugLog.enabled = BuildConfig.DEBUG
+        VbDebugLog.log("app", "started, debug=${BuildConfig.DEBUG}")
         val settingsRepository = SettingsRepository(applicationContext)
         setContent {
             val settings by settingsRepository.settings.collectAsState(initial = VbSettings())

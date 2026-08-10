@@ -40,6 +40,7 @@ import me.thimmaiah.voxbox.settings.AboutScreen
 import me.thimmaiah.voxbox.settings.AppearanceScreen
 import me.thimmaiah.voxbox.settings.AudioRecoveryScreen
 import me.thimmaiah.voxbox.settings.ConnectionScreen
+import me.thimmaiah.voxbox.settings.DebugLogScreen
 import me.thimmaiah.voxbox.settings.ExportScreen
 import me.thimmaiah.voxbox.settings.PrivacyScreen
 import me.thimmaiah.voxbox.settings.SettingsScreen
@@ -190,6 +191,10 @@ private fun VbNavGraph(
         }
         composable(VbRoute.SET_ABOUT) {
             AboutScreen { navController.popBackStack() }
+        }
+        // TEMPORARY. Remove with the debug log; see docs/TEMPORARY_DEBUG_LOG.md.
+        composable(VbRoute.SET_DEBUG) {
+            DebugLogScreen { navController.popBackStack() }
         }
     }
 }

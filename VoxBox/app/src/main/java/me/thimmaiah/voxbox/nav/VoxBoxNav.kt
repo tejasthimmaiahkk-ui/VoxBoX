@@ -25,6 +25,9 @@ object VbRoute {
     const val SET_EXPORT = "settings/export"
     const val SET_ABOUT = "settings/about"
 
+    /** TEMPORARY. Remove with the debug log; see docs/TEMPORARY_DEBUG_LOG.md. */
+    const val SET_DEBUG = "settings/diagnostics"
+
     const val ONBOARDING = "onboarding"
 
     fun note(noteId: String) = "note/$noteId"

@@ -1,6 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Only the two directories the app deliberately hands out are exposed, and each is scoped to its
+  own subdirectory. Note assets, the Room database and retained recovery audio all live elsewhere
+  under filesDir and are never reachable through the provider.
+-->
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <cache-path
         name="note_exports"
         path="exports/" />
+    <!-- Temporary diagnostic log. Remove with the feature; see docs/TEMPORARY_DEBUG_LOG.md. -->
+    <files-path
+        name="debug_log"
+        path="debug/" />
 </paths>

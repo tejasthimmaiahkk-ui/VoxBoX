@@ -63,6 +63,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.thimmaiah.voxbox.camera.VbCameraController
+import me.thimmaiah.voxbox.reader.MarkdownBody
 import me.thimmaiah.voxbox.reader.parseNoteForReview
 import me.thimmaiah.voxbox.ui.VbPill
 import me.thimmaiah.voxbox.ui.VbPrimaryButton
@@ -487,11 +488,18 @@ private fun LivingNotePanel(
                 // Strip the review section: its HTML markers and "Suggested:" lines are for the
                 // reader to render as decisions, and shown raw they read as lecture content.
                 val parsed = parseNoteForReview(markdown)
-                Text(
-                    text = parsed.body.ifBlank { "The note starts filling in after the first chunk." },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = VbLiveFgBody,
-                )
+                if (parsed.body.isBlank()) {
+                    Text(
+                        text = "The note starts filling in after the first chunk.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = VbLiveFgBody,
+                    )
+                } else {
+                    MarkdownBody(
+                        markdown = parsed.body,
+                        bodyStyle = MaterialTheme.typography.bodyMedium.copy(color = VbLiveFgBody),
+                    )
+                }
                 if (parsed.flags.isNotEmpty() || parsed.warnings.isNotEmpty()) {
                     Spacer(Modifier.height(10.dp))
                     Text(

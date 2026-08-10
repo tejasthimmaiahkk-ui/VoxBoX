@@ -93,6 +93,15 @@ fun SettingsScreen(
                 onClick = { onOpen(VbRoute.SET_ABOUT) },
             )
         }
+
+        // TEMPORARY. Remove with the debug log; see docs/TEMPORARY_DEBUG_LOG.md.
+        VbSettingsGroup("Diagnostics") {
+            VbNavRow(
+                title = "Debug log",
+                supporting = "Temporary. Share a session log when something goes wrong.",
+                onClick = { onOpen(VbRoute.SET_DEBUG) },
+            )
+        }
     }
 }
 
