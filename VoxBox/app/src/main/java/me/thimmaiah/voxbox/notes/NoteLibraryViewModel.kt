@@ -14,7 +14,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import me.thimmaiah.voxbox.voxscript.VoxScriptResult
 
 data class NoteLibraryUiState(
     val notes: List<NoteEntity> = emptyList(),
@@ -190,23 +189,6 @@ class NoteLibraryViewModel(application: Application) : AndroidViewModel(applicat
                     status = if (saved) "Saved block changes locally." else "Block was not found; changes were not saved.",
                 )
             }
-        }
-    }
-
-    fun savePreview(result: VoxScriptResult) {
-        val block = result.toNoteBlockOrNull()
-        if (block == null) {
-            _uiState.value = _uiState.value.copy(status = "Correct the command before saving it.")
-            return
-        }
-        viewModelScope.launch {
-            val activeId = _uiState.value.activeNoteId ?: run {
-                val created = repository.createNote("Voice note ${_uiState.value.totalNoteCount + 1}")
-                activateCreatedNote(created, status = "${created.title} is ready for blocks.")
-                created.id
-            }
-            repository.appendBlock(activeId, block)
-            _uiState.value = _uiState.value.copy(status = "${block.type.name.lowercase().replace('_', ' ')} saved locally.")
         }
     }
 

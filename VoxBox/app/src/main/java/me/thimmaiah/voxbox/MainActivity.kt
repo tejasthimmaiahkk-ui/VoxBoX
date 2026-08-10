@@ -7,10 +7,11 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import me.thimmaiah.voxbox.data.SettingsRepository
 import me.thimmaiah.voxbox.data.VbSettings
 import me.thimmaiah.voxbox.data.VbThemeMode
-import me.thimmaiah.voxbox.ui.VoxBoxScreen
+import me.thimmaiah.voxbox.ui.VoxBoxApp
 import me.thimmaiah.voxbox.ui.theme.VoxBoxTheme
 
 class MainActivity : ComponentActivity() {
@@ -25,10 +26,12 @@ class MainActivity : ComponentActivity() {
                 VbThemeMode.Dark -> true
                 VbThemeMode.Light -> false
             }
-            // Still the pre-redesign screen. The new navigation graph lands with the screens it
-            // routes to; wiring it before they exist would only break the app.
             VoxBoxTheme(darkTheme = dark, accent = settings.accent) {
-                VoxBoxScreen()
+                VoxBoxApp(
+                    settingsRepository = settingsRepository,
+                    onboarded = settings.onboarded,
+                    scope = rememberCoroutineScope(),
+                )
             }
         }
     }

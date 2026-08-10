@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -50,7 +51,10 @@ fun VbSubPage(
                 icon = VbIcons.ArrowBack,
                 contentDescription = "Back",
                 onClick = onBack,
-                modifier = Modifier.padding(start = (-12).dp),
+                // offset, not padding: the icon's 48.dp hit box is wider than the glyph, and
+                // pulling it left aligns the glyph with the screen margin. Modifier.padding
+                // rejects a negative value at runtime; offset is the one that shifts.
+                modifier = Modifier.offset(x = (-12).dp),
             )
         }
         Spacer(Modifier.height(4.dp))
