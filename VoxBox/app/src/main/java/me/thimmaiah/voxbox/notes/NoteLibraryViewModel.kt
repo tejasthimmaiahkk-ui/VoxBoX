@@ -123,6 +123,31 @@ class NoteLibraryViewModel(application: Application) : AndroidViewModel(applicat
         )
     }
 
+    fun renameNote(noteId: String, title: String) {
+        viewModelScope.launch {
+            val renamed = repository.renameNote(noteId, title)
+            _uiState.value = _uiState.value.copy(
+                status = if (renamed) "Renamed." else "That note no longer exists.",
+            )
+        }
+    }
+
+    /**
+     * Deletes a note and everything captured with it.
+     *
+     * Irreversible and not undoable, which is why the UI asks first and names what goes: the
+     * transcript behind a lecture cannot be recorded again.
+     */
+    fun deleteNote(noteId: String) {
+        viewModelScope.launch {
+            val deleted = repository.deleteNote(noteId)
+            _uiState.value = _uiState.value.copy(
+                activeNoteId = _uiState.value.activeNoteId?.takeIf { it != noteId },
+                status = if (deleted) "Note deleted." else "That note no longer exists.",
+            )
+        }
+    }
+
     fun exportActiveNote() {
         val state = _uiState.value
         val note = state.allNotes.firstOrNull { it.id == state.activeNoteId } ?: return

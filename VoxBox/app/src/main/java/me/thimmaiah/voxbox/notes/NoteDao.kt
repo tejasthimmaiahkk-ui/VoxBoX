@@ -39,6 +39,16 @@ interface NoteDao {
     @Query("UPDATE notes SET updatedAt = :updatedAt WHERE id = :noteId")
     suspend fun touchNote(noteId: String, updatedAt: Long)
 
+    @Query("UPDATE notes SET title = :title, updatedAt = :updatedAt WHERE id = :noteId")
+    suspend fun renameNote(noteId: String, title: String, updatedAt: Long): Int
+
+    /**
+     * Deletes the note row. Blocks, assets, locations and provenance follow through their
+     * foreign keys; capture sessions and their transcripts are keyed to the note and go too.
+     */
+    @Query("DELETE FROM notes WHERE id = :noteId")
+    suspend fun deleteNote(noteId: String): Int
+
     @Query("""
         UPDATE note_blocks
         SET content = :content, chartValue = :chartValue, accentColor = :accentColor, label = :label

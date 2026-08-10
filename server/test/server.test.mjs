@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import {
   createVoxBoxServer,
+  groundingRatio,
   normalizeNoteMarkdown,
   NOTE_MODEL,
   TRANSCRIPTION_MODEL,
@@ -1065,4 +1066,125 @@ test("an empty full note is still rejected, because it would erase the note", as
 
   assert.equal(response.status, 502);
   assert.equal((await response.json()).error.code, "invalid_upstream_response");
+});
+
+
+// --- grounding guard ------------------------------------------------------------------
+//
+// A live session whose only speech was "Is this working?" produced a confident section
+// headed "Chemical Reactions". A prompt instruction is a request, not a guarantee, so the
+// text is checked against the evidence it claims to summarise.
+
+const groundingRequest = {
+  transcriptSegments: [
+    { id: "s1", text: "Both terms share a common factor of three x, so we take it outside the bracket." },
+    { id: "s2", text: "Always check whether the bracket factorises again before you stop." },
+  ],
+  boardEvidence: null,
+};
+
+test("a summary written from the evidence scores well above the floor", () => {
+  const delta = [
+    "## Common factor",
+    "- Take the highest common factor outside the bracket.",
+    "- Check whether the bracket factorises again.",
+  ].join("\n");
+
+  assert.ok(groundingRatio(delta, groundingRequest) > 0.5);
+});
+
+test("a section about a subject nobody mentioned scores near zero", () => {
+  const delta = [
+    "## Chemical Reactions",
+    "- A chemical reaction is a process that involves the rearrangement of molecules or ions.",
+  ].join("\n");
+
+  assert.ok(groundingRatio(delta, groundingRequest) < 0.25);
+});
+
+test("markdown furniture is not counted as vocabulary", () => {
+  const bare = "Take the common factor outside the bracket.";
+  const decorated = "## Heading\n\n- **Take** the *common* `factor` outside the bracket.\n";
+
+  const difference = Math.abs(
+    groundingRatio(bare, groundingRequest) - groundingRatio(decorated, groundingRequest),
+  );
+  assert.ok(difference < 0.2, `ratios differed by ${difference}`);
+});
+
+test("an invented section is discarded and the discard is reported", async () => {
+  const invented = [
+    "## Chemical Reactions",
+    "- A chemical reaction is a process that involves the rearrangement of the structure of",
+    "  molecules or ions during synthesis and decomposition.",
+  ].join("\n");
+  const base = await start({
+    env: { OPENROUTER_API_KEY: "test", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+    fetchImpl: async () => new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({
+        title: "Algebra",
+        markdownDelta: invented,
+        corrections: [],
+        consumedEvidenceIds: [],
+        warnings: [],
+      }) } }],
+    }), { status: 200 }),
+  });
+
+  const response = await post(base, "/v1/notes/refine", noteRequest({
+    responseMode: "delta",
+    existingMarkdown: "",
+    transcriptSegments: [{
+      id: "segment-1",
+      speakerId: "A",
+      startMs: 0,
+      endMs: 2_000,
+      text: "Is this working?",
+      isPrimarySpeaker: true,
+    }],
+    noteContext: {
+      title: "Algebra",
+      outlineMarkdown: "# Algebra",
+      recentMarkdown: "Some text.",
+      contentSha256: "a".repeat(64),
+    },
+  }));
+
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  // Dropping it costs one chunk of notes; keeping it puts something in a study note that
+  // nobody ever said.
+  assert.equal(body.markdownDelta, "");
+  assert.ok(
+    body.warnings.some((warning) => warning.includes("did not match the captured evidence")),
+    JSON.stringify(body.warnings),
+  );
+});
+
+test("a short delta is left alone, because short text cannot be scored fairly", async () => {
+  const base = await start({
+    env: { OPENROUTER_API_KEY: "test", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+    fetchImpl: async () => new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({
+        title: "Algebra",
+        markdownDelta: "- Noted.",
+        corrections: [],
+        consumedEvidenceIds: [],
+        warnings: [],
+      }) } }],
+    }), { status: 200 }),
+  });
+
+  const response = await post(base, "/v1/notes/refine", noteRequest({
+    responseMode: "delta",
+    existingMarkdown: "",
+    noteContext: {
+      title: "Algebra",
+      outlineMarkdown: "# Algebra",
+      recentMarkdown: "Some text.",
+      contentSha256: "a".repeat(64),
+    },
+  }));
+
+  assert.equal((await response.json()).markdownDelta, "- Noted.");
 });

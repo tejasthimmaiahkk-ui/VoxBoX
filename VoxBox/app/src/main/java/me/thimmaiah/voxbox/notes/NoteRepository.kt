@@ -13,6 +13,12 @@ interface NoteRepository {
     suspend fun appendBlock(noteId: String, block: NewNoteBlock)
     suspend fun appendBlocks(noteId: String, blocks: List<NewNoteBlock>)
     suspend fun updateBlock(noteId: String, blockId: String, update: NoteBlockUpdate): Boolean
+
+    /** Returns false when the note no longer exists. */
+    suspend fun renameNote(noteId: String, title: String): Boolean
+
+    /** Removes the note and everything that hangs off it. Not reversible. */
+    suspend fun deleteNote(noteId: String): Boolean
 }
 
 class RoomNoteRepository(
@@ -92,4 +98,12 @@ class RoomNoteRepository(
         accentColor = accentColor,
         label = label,
     )
+
+    override suspend fun renameNote(noteId: String, title: String): Boolean {
+        val clean = title.trim().take(120)
+        if (clean.isEmpty()) return false
+        return dao.renameNote(noteId, clean, System.currentTimeMillis()) > 0
+    }
+
+    override suspend fun deleteNote(noteId: String): Boolean = dao.deleteNote(noteId) > 0
 }
