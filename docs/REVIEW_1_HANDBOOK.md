@@ -122,7 +122,17 @@ Runs entirely on the phone, before any network call.
    dimming or auto-exposure adjusting does not read as "the board changed".
 3. Combine two signals: **centred pixel difference** and **fraction of pixels that changed**.
 4. Compare against the last *successfully committed* board state, not merely the last frame seen.
-5. Score ≥ threshold → send to the vision model. Below → **delete the frame immediately**, no API call.
+5. **Require the change to settle** — a frame that differs from the committed state is not sent
+   straight away; the next sample has to still look like it.
+6. Settled and above threshold → send to the vision model. Anything else → **delete the frame
+   immediately**, no API call.
+
+**The settle step came out of a classroom test.** A teacher walking across the camera changed the
+frame, so the filter paid for a board that had not changed. Writing appears and stays there, and a
+projector slide changes and stays there, so both settle within one interval and are sent. A person
+keeps changing the frame while they move and then leaves it as it was, so nothing is ever uploaded.
+The cost is one sampling interval of latency. Five unit tests cover it, including the walk-past case
+and a projector slide change, which must be treated differently from each other.
 
 **Two-phase commit is the subtle part.** A new baseline is only adopted after the note update and the
 diagram crops have been saved. If extraction fails, the baseline stays where it was, so the same
@@ -251,10 +261,10 @@ Keep these straight. If asked "have you tested it?", answer with the level.
 
 | Level | What it means | Examples |
 | --- | --- | --- |
-| **Automated** | Repeatable tests pass | 88 Android unit tests / 28 suites; 30 backend tests; 0 lint errors |
+| **Automated** | Repeatable tests pass | 97 Android unit tests / 29 suites; 36 backend tests; 0 lint errors |
 | **Device-verified** | Ran on the real phone (Android 16, Redmi) | Voice session 11.1 s; camera + audio session 32.3 s; both automated and repeatable |
 | **Live-provider verified** | Real AI models, through the deployed proxy | All four endpoints; two-speaker clip correctly split A/B; equation read exactly; diagram crop matched a known rectangle closely |
-| **Real-world trial** | An actual lecture video | One 2.5-minute algebra segment, 3 board states. Produced a full structured note — and exposed 4 defects, all since fixed |
+| **Real-world trials** | A recorded lecture, then a live class | Both produced complete structured notes, and between them exposed 7 defects — all since fixed and covered by tests |
 | **Not yet measured** | Be explicit | Word error rate, diarization accuracy, OCR accuracy, diagram-crop IoU on a real corpus, battery, long-session endurance |
 
 **If asked for accuracy percentages:** *"I haven't published one, because I don't yet have a fixed
@@ -263,29 +273,44 @@ measurement plan is in my test plan document, and it's the next phase of work."*
 
 That answer is stronger than a made-up figure.
 
-### Cost — a real measured number you can quote
+### Cost — quote the change, not a new number
 
-Roughly **$0.18 per lecture-hour** across transcription, board vision and note generation. The
-backend also enforces a hard daily request budget and a per-caller rate limit, so cost cannot run
-away.
+The first measurement was **$0.18 per lecture-hour**. Almost all of it was input, not output: a note
+update is sent about every 20 seconds, so forwarded context is billed roughly 180 times an hour, and
+the bounds allowed **48,000 characters per call** — around 12,000 tokens each time.
+
+That is now capped at **8,000 characters** (outline 2,000, recent tail 3,000, syllabus 3,000), with a
+unit test asserting the ceiling, and delta output capped at 1,200 tokens instead of 3,000.
+
+**Say:** *"the context sent per update is down 6×, and I am re-measuring the per-hour figure in the
+next session rather than quoting a projection."* Do not quote a new dollar number — you have not
+measured one. The backend also enforces a hard daily request budget and a per-caller rate limit, so
+cost cannot run away regardless.
 
 ---
 
 ## 8. The real-lecture trial — use it, don't hide it
 
-You tested on a YouTube algebra lecture (2.5 minutes, 3 board states). It produced a complete
-structured note **and** revealed four defects, all now fixed:
+Two trials: a YouTube algebra lecture (2.5 minutes, 3 board states), then a live class. Both
+produced complete structured notes, and between them exposed **seven** defects, all now fixed:
 
 | Defect found | Fix |
 | --- | --- |
 | Note generation timed out at session scale | Measured candidates properly; switched to a model ~60× faster on the same task |
-| Some formulas rendered as raw text in Obsidian | Server now normalises LaTeX delimiters to the forms Obsidian actually renders |
-| Far too much content for a small concept | Added short / balanced / elaborate control plus a custom instruction box |
+| Some formulas rendered as raw text | Server rewrites every LaTeX delimiter form to the two the reader renders, and leaves fenced code alone |
+| Far too much content for a small concept | Concise is now the default, plus a custom instruction field |
 | A worked example appeared that was on neither board nor transcript | Prompt now forbids examples not present in the evidence |
+| Teacher movement triggered board uploads | A change must survive to the next sample before it is sent |
+| Running cost too high | Forwarded context capped at 8,000 characters per update, down from 48,000 |
+| **The fixes were never deployed** | The live service was still serving pre-fix code. Verifying the running deployment is now part of the fix |
 
-**Say this out loud.** "I tested on real material, it broke in four places, here is each fix" is
+**Say this out loud.** "I tested on real material, it broke in seven places, here is each fix" is
 exactly what a reviewer wants to hear at review 1. It demonstrates a working test-and-fix loop, which
 is worth more than a demo that happens to go well.
+
+**The last one is the best answer in this document.** A commit is not a release. The code was correct
+and the tests passed, and the thing students were actually using was still broken — because nobody had
+checked the running system. If you are asked what you learned building this, that is the answer.
 
 ---
 
@@ -350,7 +375,7 @@ It needs sustained microphone and camera access, foreground-service-style lifecy
 local-first storage. That's native territory. It's also where the student already is during a lecture.
 
 **"How much does it cost to run?"**
-About $0.18 per lecture-hour measured, on a free hosting tier. There's a hard daily request cap and a
+First measured at $0.18 per lecture-hour; context per update has since been cut 6× and the figure is being re-measured. Free hosting tier. There's a hard daily request cap and a
 per-caller rate limit in the backend so it can't run away.
 
 **"What was the hardest part?"**
@@ -388,7 +413,7 @@ recorded run"* and show the exported Markdown. Reviewers mind a bluff far more t
 | 2–30 s | Camera interval range (8 s default) |
 | 32×32 | Luminance grid for change detection |
 | 58 % / 15 pts | Dominant-speaker thresholds |
-| ~$0.18 | Measured cost per lecture-hour |
+| 8,000 | Characters of context per note update, capped — down from 48,000 |
 | 88 / 30 | Android unit tests / backend tests, all passing |
 | 4 | Defects found by the real-lecture trial, all fixed |
 
