@@ -192,6 +192,51 @@ class NoteLibraryViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
+
+    /** Transcript behind a note, so the reader can quote the evidence under a review flag. */
+    suspend fun transcriptFor(noteId: String): List<TranscriptSegmentEntity> =
+        runCatching { sessionRepository.transcriptForNote(noteId) }.getOrDefault(emptyList())
+
+    /**
+     * Dismisses a suggestion and leaves the captured line exactly as it was.
+     *
+     * Removing only the flag is the entire point: the note keeps what the lecturer actually said,
+     * and the disagreement stops asking for a decision that has now been made.
+     */
+    fun resolveFlagKeepingCapture(blockId: String, suggested: String) {
+        val noteId = _uiState.value.activeNoteId ?: return
+        val block = _uiState.value.activeBlocks.firstOrNull { it.id == blockId } ?: return
+        viewModelScope.launch {
+            val updated = removeFlagWithSuggestion(block.content, suggested)
+            repository.updateBlock(noteId, blockId, block.updateWithContent(updated))
+            _uiState.value = _uiState.value.copy(status = "Kept the captured line. Suggestion dismissed.")
+        }
+    }
+
+    /**
+     * Records the suggestion beside the captured line rather than in place of it.
+     *
+     * The annotation is explicitly labelled as a suggestion, so a reader months later can still
+     * tell which words came from the lecture and which came from a model.
+     */
+    fun annotateFlag(blockId: String, flag: me.thimmaiah.voxbox.reader.ReviewFlag) {
+        val noteId = _uiState.value.activeNoteId ?: return
+        val block = _uiState.value.activeBlocks.firstOrNull { it.id == blockId } ?: return
+        viewModelScope.launch {
+            val withoutFlag = removeFlagWithSuggestion(block.content, flag.suggested)
+            val annotated = buildString {
+                append(withoutFlag.trimEnd())
+                appendLine()
+                appendLine()
+                appendLine("> [!note] Suggested correction (not spoken)")
+                appendLine("> Captured: ${flag.captured}")
+                append("> Suggested: ${flag.suggested}")
+            }
+            repository.updateBlock(noteId, blockId, block.updateWithContent(annotated))
+            _uiState.value = _uiState.value.copy(status = "Annotation added beside the captured line.")
+        }
+    }
+
     fun saveBoardCapture(
         title: String,
         summary: String,
@@ -228,3 +273,44 @@ class NoteLibraryViewModel(application: Application) : AndroidViewModel(applicat
         )
     }
 }
+
+/**
+ * Drops one correction from a note's review section, leaving the rest of the section intact.
+ *
+ * Matching on the suggestion text rather than an index means a resolved flag stays resolved even
+ * if the section is rewritten by a later note update that reorders it.
+ */
+internal fun removeFlagWithSuggestion(markdown: String, suggested: String): String {
+    if (suggested.isBlank()) return markdown
+    val lines = markdown.lines()
+    val keep = mutableListOf<String>()
+    var index = 0
+    while (index < lines.size) {
+        val line = lines[index]
+        val isCaptured = line.trimStart().startsWith("- **Captured:**")
+        if (!isCaptured) {
+            keep += line
+            index += 1
+            continue
+        }
+        // Collect this correction: the Captured line plus its indented detail lines.
+        val entry = mutableListOf(line)
+        var cursor = index + 1
+        while (cursor < lines.size && lines[cursor].startsWith("  - **")) {
+            entry += lines[cursor]
+            cursor += 1
+        }
+        val matches = entry.any { it.contains("**Suggested:**") && it.contains(suggested) }
+        if (!matches) keep += entry
+        index = cursor
+    }
+    return keep.joinToString("\n").replace(Regex("\n{3,}"), "\n\n").trim()
+}
+
+/** Rewrites only a block's text, preserving the chart fields a pie-chart block carries. */
+internal fun NoteBlockEntity.updateWithContent(content: String) = NoteBlockUpdate(
+    content = content,
+    chartValue = chartValue,
+    accentColor = accentColor,
+    label = label,
+)

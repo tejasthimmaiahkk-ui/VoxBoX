@@ -57,6 +57,7 @@ import me.thimmaiah.voxbox.data.SettingsRepository
 import me.thimmaiah.voxbox.data.VbSettings
 import me.thimmaiah.voxbox.notes.NoteBlockEntity
 import me.thimmaiah.voxbox.notes.NoteBlockType
+import me.thimmaiah.voxbox.notes.TranscriptSegmentEntity
 import me.thimmaiah.voxbox.notes.NoteLibraryViewModel
 import me.thimmaiah.voxbox.ui.VbEyebrow
 import me.thimmaiah.voxbox.ui.VbIconButton
@@ -64,6 +65,7 @@ import me.thimmaiah.voxbox.ui.VbIcons
 import me.thimmaiah.voxbox.ui.VbOutlineButton
 import me.thimmaiah.voxbox.ui.VbPrimaryButton
 import me.thimmaiah.voxbox.ui.VbSegmented
+import me.thimmaiah.voxbox.ui.VbSwitchRow
 import me.thimmaiah.voxbox.ui.theme.LocalVbStatus
 import me.thimmaiah.voxbox.ui.theme.VbMono
 import me.thimmaiah.voxbox.ui.theme.VbReadingSize
@@ -96,8 +98,13 @@ fun NoteReaderScreen(
     var sheet by remember { mutableStateOf(Sheet.NONE) }
     var finding by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
+    var focus by remember { mutableStateOf(false) }
 
     LaunchedEffect(noteId) { viewModel.openNote(noteId) }
+
+    // Evidence quoting needs the transcript, which is not part of the note's blocks.
+    var evidence by remember { mutableStateOf<List<TranscriptSegmentEntity>>(emptyList()) }
+    LaunchedEffect(noteId) { evidence = viewModel.transcriptFor(noteId) }
 
     val note = state.allNotes.firstOrNull { it.id == noteId }
     val blocks = state.activeBlocks
@@ -110,6 +117,11 @@ fun NoteReaderScreen(
             .fillMaxSize()
             .statusBarsPadding(),
     ) {
+        AnimatedVisibility(
+            visible = !focus,
+            enter = expandVertically(tween(300)) + fadeIn(tween(300)),
+            exit = shrinkVertically(tween(300)) + fadeOut(tween(300)),
+        ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
@@ -129,6 +141,7 @@ fun NoteReaderScreen(
             VbIconButton(VbIcons.Edit, "Reading options", { sheet = Sheet.READING })
             VbIconButton(VbIcons.Search, "Find in note", { finding = !finding })
             VbIconButton(VbIcons.Share, "Share", { sheet = Sheet.SHARE })
+        }
         }
 
         AnimatedVisibility(
@@ -176,8 +189,13 @@ fun NoteReaderScreen(
                 .navigationBarsPadding(),
         ) {
             itemsIndexed(blocks, key = { _, block -> block.id }) { _, block ->
+                val parsed = parseNoteForReview(block.content)
                 ReaderBlock(
-                    block = block,
+                    block = if (parsed.flags.isEmpty() && parsed.warnings.isEmpty()) {
+                        block
+                    } else {
+                        block.copy(content = parsed.body)
+                    },
                     query = query,
                     bodyStyle = bodyStyle,
                     onEdit = {
@@ -185,6 +203,22 @@ fun NoteReaderScreen(
                         sheet = Sheet.EDIT
                     },
                 )
+                parsed.warnings.forEach { warning ->
+                    Text(
+                        text = warning,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = LocalVbStatus.current.review,
+                        modifier = Modifier.padding(vertical = 4.dp),
+                    )
+                }
+                parsed.flags.forEach { flag ->
+                    ReviewFlagCard(
+                        flag = flag,
+                        evidence = evidence,
+                        onKeepCaptured = { viewModel.resolveFlagKeepingCapture(block.id, flag.suggested) },
+                        onAddAnnotation = { viewModel.annotateFlag(block.id, flag) },
+                    )
+                }
             }
             if (blocks.isEmpty()) {
                 item {
@@ -258,6 +292,13 @@ fun NoteReaderScreen(
                     label = { if (it) "Serif" else "Sans" },
                     onSelect = { scope.launch { settingsRepository.setReadingSerif(it) } },
                     modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(14.dp))
+                VbSwitchRow(
+                    title = "Focus mode",
+                    supporting = "Hides the toolbar so only the note is on screen.",
+                    checked = focus,
+                    onCheckedChange = { focus = it },
                 )
                 Spacer(Modifier.height(24.dp))
             }

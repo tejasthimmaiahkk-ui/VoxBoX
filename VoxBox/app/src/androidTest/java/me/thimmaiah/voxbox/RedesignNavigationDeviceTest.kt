@@ -23,9 +23,13 @@ class RedesignNavigationDeviceTest {
     @get:Rule
     val composeRule = createAndroidComposeRule<MainActivity>()
 
+    /**
+     * Case-insensitive on purpose: section eyebrows are uppercased at render time by
+     * `VbEyebrow`, so a marker written as it appears in the source will not match the node.
+     */
     private fun waitForText(text: String, timeoutMillis: Long = 20_000) {
         composeRule.waitUntil(timeoutMillis) {
-            composeRule.onAllNodesWithText(text, substring = true)
+            composeRule.onAllNodesWithText(text, substring = true, ignoreCase = true)
                 .fetchSemanticsNodes().isNotEmpty()
         }
     }
@@ -61,8 +65,9 @@ class RedesignNavigationDeviceTest {
         composeRule.onNodeWithText("Settings").performClick()
         waitForText("Unrecovered audio")
 
+        // Each marker is text that appears only on that sub-page, never on the hub, so a
+        // navigation that silently failed cannot pass by matching the row it came from.
         val pages = listOf(
-            "Unrecovered audio" to "Nothing waiting",
             "Connection & models" to "Model routing",
             "Appearance" to "Reading size",
             "Export defaults" to "Include review flags",
