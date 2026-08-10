@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Motion durations in ms. Mirrors section 7 of REDESIGN_IMPLEMENTATION.md. -->
+<resources>
+    <integer name="vb_dur_screen_enter">380</integer>
+    <integer name="vb_dur_block_enter">500</integer>
+    <integer name="vb_dur_block_stagger">60</integer>
+    <integer name="vb_dur_switch">280</integer>
+    <integer name="vb_dur_expand">300</integer>
+    <integer name="vb_dur_sheet">340</integer>
+    <integer name="vb_dur_scrim">250</integer>
+    <integer name="vb_dur_toast">350</integer>
+    <integer name="vb_dur_toast_hold">2600</integer>
+    <integer name="vb_dur_theme_crossfade">400</integer>
+    <integer name="vb_dur_press">200</integer>
+    <integer name="vb_dur_item_arrive">450</integer>
+    <integer name="vb_loop_ring">2600</integer>
+    <integer name="vb_loop_ring_offset">900</integer>
+    <integer name="vb_loop_focus_frame">2400</integer>
+    <integer name="vb_loop_live_dot">1400</integer>
+    <integer name="vb_loop_queue_dot">1000</integer>
+    <integer name="vb_loop_voice_bar">1100</integer>
+    <integer name="vb_loop_voice_stagger">130</integer>
+    <integer name="vb_loop_scan">3400</integer>
+    <integer name="vb_zoom_readout_idle">1200</integer>
+</resources>

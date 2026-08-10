@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Display serif for screen titles. Swap for Playfair Display if you prefer a lighter weight. -->
+<font-family xmlns:app="http://schemas.android.com/apk/res-auto"
+    app:fontProviderAuthority="com.google.android.gms.fonts"
+    app:fontProviderPackage="com.google.android.gms"
+    app:fontProviderQuery="name=Caprasimo"
+    app:fontProviderCerts="@array/com_google_android_gms_fonts_certs" />

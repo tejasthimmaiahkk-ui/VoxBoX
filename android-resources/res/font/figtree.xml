@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Downloadable font. Requires the Google Fonts provider certs in
+  res/values/font_certs.xml and a <meta-data android:name="preloaded_fonts"> entry.
+  Replace with bundled .ttf files if the app must work offline on first run.
+-->
+<font-family xmlns:app="http://schemas.android.com/apk/res-auto"
+    app:fontProviderAuthority="com.google.android.gms.fonts"
+    app:fontProviderPackage="com.google.android.gms"
+    app:fontProviderQuery="name=Figtree&amp;weight=400"
+    app:fontProviderCerts="@array/com_google_android_gms_fonts_certs" />

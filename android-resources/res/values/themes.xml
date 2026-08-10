@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Light-theme base. The Compose colour scheme is built in ui/theme/Theme.kt;
+  this XML theme drives the window, splash and any View interop.
+  Apply an accent overlay on the activity to switch hue:
+      android:theme="@style/Theme.VoxBox"
+      + setTheme(R.style.ThemeOverlay_VoxBox_Green) before setContent()
+-->
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <style name="Theme.VoxBox" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/vb_blue_dark</item>
+        <item name="colorOnPrimary">@color/vb_on_accent_light</item>
+        <item name="colorSecondary">@color/vb_blue_dark</item>
+        <item name="android:colorBackground">@color/vb_bg_light</item>
+        <item name="colorSurface">@color/vb_surface_light</item>
+        <item name="colorSurfaceVariant">@color/vb_surface_variant_light</item>
+        <item name="colorOnBackground">@color/vb_fg_light</item>
+        <item name="colorOnSurface">@color/vb_fg_light</item>
+        <item name="colorOnSurfaceVariant">@color/vb_fg2_light</item>
+        <item name="colorOutlineVariant">@color/vb_line_light</item>
+        <item name="colorError">@color/vb_red_dark</item>
+
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">true</item>
+        <item name="android:enforceNavigationBarContrast" tools:targetApi="29">false</item>
+        <item name="android:windowActivityTransitions">true</item>
+    </style>
+
+    <!-- Accent overlays. Status colours are deliberately NOT touched here. -->
+    <style name="ThemeOverlay.VoxBox.Blue" parent="">
+        <item name="colorPrimary">@color/vb_blue_dark</item>
+        <item name="colorOnPrimary">@color/vb_on_accent_light</item>
+    </style>
+    <style name="ThemeOverlay.VoxBox.Green" parent="">
+        <item name="colorPrimary">@color/vb_green_dark</item>
+        <item name="colorOnPrimary">@color/vb_on_accent_light</item>
+    </style>
+    <style name="ThemeOverlay.VoxBox.Orange" parent="">
+        <item name="colorPrimary">@color/vb_orange_dark</item>
+        <item name="colorOnPrimary">@color/vb_on_accent_dark</item>
+    </style>
+    <style name="ThemeOverlay.VoxBox.Red" parent="">
+        <item name="colorPrimary">@color/vb_red_dark</item>
+        <item name="colorOnPrimary">@color/vb_on_accent_light</item>
+    </style>
+
+    <!-- Live capture surface: dark regardless of app theme. -->
+    <style name="Theme.VoxBox.Live" parent="Theme.VoxBox">
+        <item name="android:colorBackground">@color/vb_live_bg</item>
+        <item name="colorSurface">@color/vb_live_surface</item>
+        <item name="colorOnSurface">@color/vb_live_fg</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+
+</resources>

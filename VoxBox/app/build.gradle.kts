@@ -179,6 +179,8 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.google.mlkit.text.recognition)
     implementation(libs.androidx.exifinterface)
+    implementation(libs.androidx.navigation.compose)
+    implementation(libs.androidx.datastore.preferences)
     ksp(libs.androidx.room.compiler)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))

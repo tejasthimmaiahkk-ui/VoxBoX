@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dark counterpart. See values/themes.xml for why this is framework-only. -->
+<resources>
+
+    <style name="Theme.VoxBox" parent="android:Theme.Material.NoActionBar">
+        <item name="android:colorBackground">@color/vb_bg_dark</item>
+        <item name="android:windowBackground">@color/vb_bg_dark</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+
+</resources>
