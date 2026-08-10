@@ -870,7 +870,16 @@ function validDiagramRegion(region) {
 function parseNoteContent(text, request, { delta }) {
   const value = parseModelJson(text, "Note provider returned invalid JSON.");
   const body = delta ? value.markdownDelta : value.markdown;
-  if (typeof value.title !== "string" || typeof body !== "string" || body.trim().length === 0) {
+  if (typeof value.title !== "string" || typeof body !== "string") {
+    throw new RequestError(502, "invalid_upstream_response", "Note provider returned an unexpected shape.");
+  }
+  // An empty *delta* is a real answer: twenty seconds of speech often adds nothing worth writing,
+  // and the concise instruction explicitly asks for one rather than padding. Treating it as a
+  // malformed response was raising "AI refinement was unavailable" during a live session for what
+  // was actually correct behaviour.
+  //
+  // An empty *full* note is still rejected: that would replace an entire note with nothing.
+  if (!delta && body.trim().length === 0) {
     throw new RequestError(502, "invalid_upstream_response", "Note provider returned an unexpected shape.");
   }
   if (!Array.isArray(value.corrections) || !Array.isArray(value.consumedEvidenceIds) || !Array.isArray(value.warnings)) {

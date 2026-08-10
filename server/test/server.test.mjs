@@ -1009,3 +1009,60 @@ test("math outside a fence is still converted when a fence is present", () => {
   assert.ok(out.includes("literal " + BS + "[ kept " + BS + "]"), out);
   assert.match(out, /\$e = mc\^2\$/);
 });
+
+// --- empty delta ----------------------------------------------------------------------
+//
+// The concise instruction asks the model to return an empty delta when a segment adds
+// nothing. Rejecting that surfaced in a live classroom session as "AI refinement was
+// unavailable" for a response that was correct.
+
+test("an empty delta is a valid answer and is passed through", async () => {
+  const base = await start({
+    env: { OPENROUTER_API_KEY: "test", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+    fetchImpl: async () => new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({
+        title: "Algebra",
+        markdownDelta: "",
+        corrections: [],
+        consumedEvidenceIds: [],
+        warnings: [],
+      }) } }],
+    }), { status: 200 }),
+  });
+
+  const response = await post(base, "/v1/notes/refine", noteRequest({
+    responseMode: "delta",
+    existingMarkdown: "",
+    noteContext: {
+      title: "Algebra",
+      outlineMarkdown: "# Algebra",
+      recentMarkdown: "Some text.",
+      contentSha256: "a".repeat(64),
+    },
+  }));
+
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.markdownDelta, "");
+  assert.equal(body.updateMode, "delta");
+});
+
+test("an empty full note is still rejected, because it would erase the note", async () => {
+  const base = await start({
+    env: { OPENROUTER_API_KEY: "test", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+    fetchImpl: async () => new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({
+        title: "Algebra",
+        markdown: "   ",
+        corrections: [],
+        consumedEvidenceIds: [],
+        warnings: [],
+      }) } }],
+    }), { status: 200 }),
+  });
+
+  const response = await post(base, "/v1/notes/refine", noteRequest());
+
+  assert.equal(response.status, 502);
+  assert.equal((await response.json()).error.code, "invalid_upstream_response");
+});
