@@ -195,6 +195,21 @@ private fun MarkdownBlock(
             )
         }
 
+        is MdBlock.Table -> Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(vertical = 10.dp)
+                .clip(VbShape.media)
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                .horizontalScroll(rememberScrollState()),
+        ) {
+            TableRow(block.header, bodyStyle, query, header = true)
+            block.rows.forEach { row ->
+                Box(Modifier.fillMaxWidth().height(1.dp).background(status.line))
+                TableRow(row, bodyStyle, query, header = false)
+            }
+        }
+
         MdBlock.Divider -> Box(
             Modifier
                 .fillMaxWidth()
@@ -202,6 +217,31 @@ private fun MarkdownBlock(
                 .height(1.dp)
                 .background(status.line),
         )
+    }
+}
+
+/** One table row. Columns are fixed-width so cells line up down the table. */
+@Composable
+private fun TableRow(
+    cells: List<List<MdSpan>>,
+    bodyStyle: TextStyle,
+    query: String,
+    header: Boolean,
+) {
+    Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+        cells.forEachIndexed { index, cell ->
+            if (index > 0) Spacer(Modifier.width(14.dp))
+            Text(
+                text = annotate(cell, query, MaterialTheme.colorScheme.primary),
+                style = if (header) {
+                    bodyStyle.copy(fontWeight = FontWeight.Bold)
+                } else {
+                    bodyStyle
+                },
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.width(150.dp),
+            )
+        }
     }
 }
 

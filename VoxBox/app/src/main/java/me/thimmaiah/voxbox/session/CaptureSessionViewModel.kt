@@ -38,6 +38,7 @@ import me.thimmaiah.voxbox.audio.RecordedAudioChunk
 import me.thimmaiah.voxbox.audio.SpeakerFocusSnapshot
 import me.thimmaiah.voxbox.audio.SpeakerFocusStatus
 import me.thimmaiah.voxbox.board.BoardExtraction
+import me.thimmaiah.voxbox.board.SpeechPaceTracker
 import me.thimmaiah.voxbox.board.BoardExtractionCoordinator
 import me.thimmaiah.voxbox.board.DiagramCropper
 import me.thimmaiah.voxbox.board.FrameChangeDetector
@@ -103,6 +104,9 @@ data class CaptureSessionUiState(
     val customInstruction: String = "",
     val frameIntervalMs: Long = CaptureSessionSettings.DEFAULT_FRAME_INTERVAL_MS,
     val changeThreshold: Double = CaptureSessionSettings.DEFAULT_CHANGE_THRESHOLD,
+    /** When on, the threshold tracks how fast the speaker is talking. See [SpeechPaceTracker]. */
+    val autoSensitivity: Boolean = true,
+    val speechWordsPerMinute: Int = 0,
     val activeNoteId: String? = null,
     val activeSession: CaptureSessionEntity? = null,
     val startedAt: Long? = null,
@@ -190,6 +194,13 @@ class CaptureSessionViewModel(
     /** Board fingerprints already committed this session, so one board is never cropped twice. */
     private val committedFrameFingerprints = synchronizedSetOf()
 
+    private val speechPaceTracker = SpeechPaceTracker()
+
+    // Auto-tuning scales from what the session started with, never from the last suggestion, so
+    // adjustments cannot compound chunk after chunk.
+    private var baseFrameIntervalMs = CaptureSessionSettings.DEFAULT_FRAME_INTERVAL_MS
+    private var baseChangeThreshold = CaptureSessionSettings.DEFAULT_CHANGE_THRESHOLD
+
     private var latestPersistedTranscriptIds: Set<String> = emptySet()
     private val noteUpdateMutex = Mutex()
     private val trackedFrameFiles = synchronizedSetOf()
@@ -246,17 +257,46 @@ class CaptureSessionViewModel(
         copy(selectedSyllabusId = syllabusId?.takeIf { id -> syllabi.any { it.id == id } }, error = null)
     }
 
-    fun setFrameIntervalMillis(value: Long) = updateSetup {
-        copy(
-            frameIntervalMs = value.coerceIn(
-                CaptureSessionSettings.MIN_FRAME_INTERVAL_MS,
-                CaptureSessionSettings.MAX_FRAME_INTERVAL_MS,
-            ),
+    /**
+     * Sampling interval, adjustable during a running session.
+     *
+     * These went through updateSetup, which only applies before a session starts, so once you
+     * pressed start the settings were frozen. A lecturer speeds up, moves to a dense slide, or
+     * starts writing quickly, and the one moment you need to change the sampling rate was the one
+     * moment you could not.
+     */
+    fun setFrameIntervalMillis(value: Long) {
+        val clamped = value.coerceIn(
+            CaptureSessionSettings.MIN_FRAME_INTERVAL_MS,
+            CaptureSessionSettings.MAX_FRAME_INTERVAL_MS,
         )
+        baseFrameIntervalMs = clamped
+        _uiState.update { it.copy(frameIntervalMs = clamped) }
+        VbDebugLog.log("tuning", "interval set to ${clamped}ms")
     }
 
-    fun setChangeThreshold(value: Double) = updateSetup {
-        copy(changeThreshold = value.coerceIn(0.01, 0.5))
+    fun setChangeThreshold(value: Double) {
+        val clamped = value.coerceIn(0.01, 0.5)
+        baseChangeThreshold = clamped
+        _uiState.update { it.copy(changeThreshold = clamped, autoSensitivity = false) }
+        VbDebugLog.log("tuning", "threshold set manually to $clamped; auto sensitivity off")
+    }
+
+    fun setAutoSensitivity(enabled: Boolean) {
+        _uiState.update { it.copy(autoSensitivity = enabled) }
+        VbDebugLog.log("tuning", "auto sensitivity ${if (enabled) "on" else "off"}")
+    }
+
+    /**
+     * Captures the next frame regardless of what the change filter thinks.
+     *
+     * The filter is a cost control. When the student can see something worth keeping, their
+     * judgement outranks it, and a missed diagram cannot be recovered after the lecture.
+     */
+    fun captureFrameNow() {
+        frameChangeDetector.forceNextCapture()
+        _uiState.update { it.copy(status = "Next frame will be captured.") }
+        VbDebugLog.log("frame", "manual capture requested")
     }
 
     fun createFolder(name: String) {
@@ -332,6 +372,9 @@ class CaptureSessionViewModel(
                 // A new lecture shares no seam with the last one.
                 lastTranscribedTail = ""
                 committedFrameFingerprints.clear()
+                speechPaceTracker.reset()
+                baseFrameIntervalMs = _uiState.value.frameIntervalMs
+                baseChangeThreshold = _uiState.value.changeThreshold
                 speakerTracker = PerChunkSpeakerTracker()
                 latestPersistedTranscriptIds = emptySet()
                 _uiState.update {
@@ -632,6 +675,31 @@ class CaptureSessionViewModel(
             )
         }
         lastTranscribedTail = transcription.segments.lastOrNull()?.text.orEmpty()
+
+        // Retune sampling to how fast the speaker is actually going. Settings chosen before the
+        // lecture are wrong within minutes once the pace changes.
+        speechPaceTracker.observe(transcription.text, chunk.durationMs)
+        if (_uiState.value.autoSensitivity) {
+            val current = _uiState.value
+            speechPaceTracker.suggest(baseFrameIntervalMs, baseChangeThreshold)?.let { tuned ->
+                if (tuned.intervalMs != current.frameIntervalMs || tuned.threshold != current.changeThreshold) {
+                    VbDebugLog.log(
+                        "tuning",
+                        "pace=${tuned.wordsPerMinute}wpm interval ${current.frameIntervalMs}->${tuned.intervalMs} " +
+                            "threshold ${"%.3f".format(current.changeThreshold)}->${"%.3f".format(tuned.threshold)}",
+                    )
+                }
+                _uiState.update {
+                    it.copy(
+                        frameIntervalMs = tuned.intervalMs,
+                        changeThreshold = tuned.threshold,
+                        speechWordsPerMinute = tuned.wordsPerMinute,
+                    )
+                }
+            }
+        } else {
+            _uiState.update { it.copy(speechWordsPerMinute = speechPaceTracker.wordsPerMinute) }
+        }
         if (deduplicated.isEmpty()) {
             deleteRecoveredAudio(chunk)
             return

@@ -15,6 +15,8 @@ sealed interface MdBlock {
     data class Quote(val callout: String?, val spans: List<MdSpan>) : MdBlock
     /** Fenced code, or a `$$…$$` display equation. Rendered monospaced and horizontally scrolled. */
     data class Code(val text: String, val isMath: Boolean) : MdBlock
+    /** Header row plus body rows. Tables are how a comparison should read, not as bullets. */
+    data class Table(val header: List<List<MdSpan>>, val rows: List<List<List<MdSpan>>>) : MdBlock
     data object Divider : MdBlock
 }
 
@@ -54,6 +56,20 @@ fun parseMarkdownBlocks(markdown: String): List<MdBlock> {
     while (index < lines.size) {
         val line = lines[index]
         val trimmed = line.trim()
+
+        // A table is a header row, a separator of dashes and pipes, then body rows.
+        if (trimmed.startsWith("|") && index + 1 < lines.size && isTableSeparator(lines[index + 1])) {
+            flushParagraph()
+            val header = tableCells(trimmed)
+            val rows = mutableListOf<List<List<MdSpan>>>()
+            index += 2
+            while (index < lines.size && lines[index].trim().startsWith("|")) {
+                rows += tableCells(lines[index].trim())
+                index += 1
+            }
+            blocks += MdBlock.Table(header, rows)
+            continue
+        }
 
         if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
             flushParagraph()
@@ -215,3 +231,13 @@ fun parseInline(text: String): List<MdSpan> {
     flush()
     return spans
 }
+
+private val tableSeparator = Regex("""^\|?[\s:|-]*-[\s:|-]*\|?$""")
+
+private fun isTableSeparator(line: String): Boolean {
+    val trimmed = line.trim()
+    return trimmed.contains('-') && trimmed.contains('|') && tableSeparator.matches(trimmed)
+}
+
+private fun tableCells(line: String): List<List<MdSpan>> =
+    line.trim().trim('|').split('|').map { cell -> parseInline(cell.trim()) }

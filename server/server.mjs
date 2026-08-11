@@ -1169,7 +1169,19 @@ function noteInstructions(request) {
     // Rendering targets are Obsidian and the in-app preview, which only understand these two forms.
     "Write mathematics with $inline$ and $$display$$ delimiters only.",
     "Never use \\( \\), \\[ \\], or LaTeX equation environments.",
-    "Use useful Markdown headings, bullet/numbered lists, **strong emphasis**, ==highlights==, <u>underlines</u>, block quotes, and LaTeX equations where warranted; do not decorate mechanically.",
+    // Real notes came back as an unbroken run of bullets, which is what a model defaults to
+    // when the only instruction is "use Markdown". Naming the forms, and what each is for,
+    // is what makes it reach for a table when the content is a comparison.
+    "Choose the Markdown form that matches the content, and do not put everything in bullets. " +
+      "Use a table when comparing two or more things across the same attributes, such as " +
+      "commands and what they do, or terms and their definitions. Use a numbered list for an " +
+      "ordered procedure, bullets only for genuinely unordered points, a short paragraph for a " +
+      "definition or an explanation, a block quote for something quoted verbatim from the board, " +
+      "and a fenced code block for commands, code or terminal output.",
+    "Separate unrelated topics with a --- horizontal rule so a long note is scannable.",
+    "Use **strong emphasis** for the term being defined, ==highlight== for something the speaker " +
+      "marked as examinable, and $inline$ or $$display$$ for mathematics.",
+    "Never decorate mechanically: a heading with one bullet under it should be a paragraph.",
     // Observed in a real session: the same rule was restated under four different headings, and a
     // worked example appeared that was on neither the board nor the transcript.
     "Do not create a new section for a rule the outline shows is already covered; extend the existing one instead.",

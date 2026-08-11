@@ -14,6 +14,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -35,7 +36,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Slider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -53,6 +56,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.semantics.contentDescription
@@ -67,6 +72,7 @@ import me.thimmaiah.voxbox.reader.MarkdownBody
 import me.thimmaiah.voxbox.reader.parseNoteForReview
 import me.thimmaiah.voxbox.ui.VbPill
 import me.thimmaiah.voxbox.ui.VbPrimaryButton
+import me.thimmaiah.voxbox.ui.VbSwitch
 import me.thimmaiah.voxbox.ui.vbLoop
 import me.thimmaiah.voxbox.ui.vbPulse
 import me.thimmaiah.voxbox.ui.theme.VbLiveBg
@@ -131,6 +137,17 @@ fun LiveSessionScreen(
                     skipped = state.skippedFrames,
                     intervalMs = state.frameIntervalMs,
                     onFrame = viewModel::onFrameCaptured,
+                )
+                Spacer(Modifier.height(10.dp))
+                LiveBoardControls(
+                    intervalMs = state.frameIntervalMs,
+                    threshold = state.changeThreshold,
+                    auto = state.autoSensitivity,
+                    wordsPerMinute = state.speechWordsPerMinute,
+                    onCaptureNow = viewModel::captureFrameNow,
+                    onInterval = viewModel::setFrameIntervalMillis,
+                    onThreshold = viewModel::setChangeThreshold,
+                    onAuto = viewModel::setAutoSensitivity,
                 )
             } else {
                 VoiceMeter()
@@ -383,18 +400,34 @@ private fun ZoomSlider(
     onFraction: (Float) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var height by remember { mutableStateOf(1f) }
+    // Measured for real. The thumb used to be positioned against a hardcoded 100.dp scale, so it
+    // sat nowhere near the finger and the control looked broken however it was dragged.
+    var heightPx by remember { mutableStateOf(1f) }
+    val density = LocalDensity.current
+    val trackHeightDp = with(density) { heightPx.toDp() }
+    val thumbTravel = (trackHeightDp - 30.dp).coerceAtLeast(0.dp)
+
+    fun fractionAt(y: Float) = (1f - (y / heightPx.coerceAtLeast(1f))).coerceIn(0f, 1f)
+
     Box(
         contentAlignment = Alignment.BottomCenter,
         modifier = modifier
             .padding(end = 6.dp)
             .width(44.dp)
             .fillMaxHeight(0.6f)
+            .onSizeChanged { heightPx = it.height.toFloat() }
             .semantics { contentDescription = "Camera zoom" }
+            // Tap to jump and drag to sweep. Only drag was handled before, and a drag that began
+            // slowly was claimed by the pinch detector on the preview underneath.
             .pointerInput(Unit) {
-                height = size.height.toFloat()
-                detectDragGestures { change, _ ->
-                    onFraction(1f - (change.position.y / height).coerceIn(0f, 1f))
+                detectTapGestures { offset -> onFraction(fractionAt(offset.y)) }
+            }
+            .pointerInput(Unit) {
+                detectDragGestures(
+                    onDragStart = { offset -> onFraction(fractionAt(offset.y)) },
+                ) { change, _ ->
+                    change.consume()
+                    onFraction(fractionAt(change.position.y))
                 }
             },
     ) {
@@ -414,7 +447,7 @@ private fun ZoomSlider(
         )
         Box(
             Modifier
-                .padding(bottom = (fraction.coerceIn(0f, 1f) * 0.9f * 100).dp)
+                .padding(bottom = thumbTravel * fraction.coerceIn(0f, 1f))
                 .size(30.dp)
                 .clip(VbShape.pill)
                 .background(Color.White),
@@ -583,5 +616,92 @@ private fun captureFrame(
     } catch (error: Exception) {
         target.delete()
         onError(error.message ?: "The frame could not be captured.")
+    }
+}
+
+/**
+ * Sampling controls, available while recording.
+ *
+ * These used to be setup-only, which meant the one moment you needed them — the speaker has
+ * sped up, the slide is dense, they have started writing quickly — was the one moment they were
+ * frozen. "Capture now" overrides the change filter outright, because a diagram you can see and
+ * the app cannot is not recoverable after the lecture.
+ */
+@Composable
+private fun LiveBoardControls(
+    intervalMs: Long,
+    threshold: Double,
+    auto: Boolean,
+    wordsPerMinute: Int,
+    onCaptureNow: () -> Unit,
+    onInterval: (Long) -> Unit,
+    onThreshold: (Double) -> Unit,
+    onAuto: (Boolean) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(VbLiveSf)
+            .padding(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            VbPrimaryButton(
+                text = "Capture now",
+                onClick = onCaptureNow,
+                height = 44.dp,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = if (open) "Hide" else "Tune",
+                style = MaterialTheme.typography.labelLarge,
+                color = VbLiveFg2,
+                modifier = Modifier
+                    .clip(VbShape.pill)
+                    .clickable { open = !open }
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+            )
+        }
+        if (open) {
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = if (auto) {
+                        if (wordsPerMinute > 0) "Auto · $wordsPerMinute wpm" else "Auto"
+                    } else {
+                        "Manual"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = VbLiveFg2,
+                    modifier = Modifier.weight(1f),
+                )
+                VbSwitch(checked = auto, onCheckedChange = onAuto)
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "Every ${intervalMs / 1000}s",
+                style = MaterialTheme.typography.bodySmall,
+                color = VbLiveFg,
+            )
+            Slider(
+                value = (intervalMs / 1000).toFloat(),
+                onValueChange = { onInterval((it.roundToInt() * 1000).toLong()) },
+                valueRange = 2f..30f,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                text = "${(threshold * 100).roundToInt()}% change to keep a frame",
+                style = MaterialTheme.typography.bodySmall,
+                color = VbLiveFg,
+            )
+            Slider(
+                value = (threshold * 100).toFloat(),
+                onValueChange = { onThreshold(it.roundToInt() / 100.0) },
+                valueRange = 2f..30f,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }

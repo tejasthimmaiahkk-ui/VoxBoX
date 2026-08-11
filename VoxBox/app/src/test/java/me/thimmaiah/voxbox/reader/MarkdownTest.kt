@@ -140,4 +140,41 @@ class MarkdownTest {
         assertTrue(!rendered.contains("##"))
         assertTrue(!rendered.contains("**"))
     }
+
+    @Test
+    fun aComparisonTableIsStructureNotPipeCharacters() {
+        val note = """
+            | Command | What it does |
+            | --- | --- |
+            | `ls` | Lists directory contents |
+            | `grep` | **Filters** lines by pattern |
+        """.trimIndent()
+
+        val blocks = parseMarkdownBlocks(note)
+
+        assertEquals(1, blocks.size)
+        val table = blocks[0] as MdBlock.Table
+        assertEquals(2, table.header.size)
+        assertEquals("Command", table.header[0].joinToString("") { it.text })
+        assertEquals(2, table.rows.size)
+        // Inline styling still applies inside a cell.
+        assertTrue(table.rows[1][1].any { it.bold })
+    }
+
+    @Test
+    fun aLineOfPipesThatIsNotATableStaysProse() {
+        val blocks = parseMarkdownBlocks("The pipe | character joins two commands.")
+
+        assertTrue(blocks[0] is MdBlock.Paragraph)
+    }
+
+    @Test
+    fun aHorizontalRuleSeparatesTopics() {
+        val blocks = parseMarkdownBlocks(
+            listOf("First topic.", "", "---", "", "Second topic.").joinToString("\n"),
+        )
+
+        assertEquals(3, blocks.size)
+        assertTrue(blocks[1] is MdBlock.Divider)
+    }
 }

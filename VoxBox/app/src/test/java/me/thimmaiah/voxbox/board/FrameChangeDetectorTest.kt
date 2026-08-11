@@ -178,4 +178,65 @@ class FrameChangeDetectorTest {
         val afterReset = detector.evaluateSample(writing.copyOf(), threshold = 0.05)
         assertEquals("First frame establishes the board baseline.", afterReset.reason)
     }
+
+    // --- regression: the settle gate held a real diagram for twenty seconds ---
+    //
+    // A field log (2026-08-11 05:29) showed a board change scoring 0.33 against the baseline and
+    // then nine consecutive frames rejected as "still moving" before one was finally accepted.
+    // The cause was an absolute settle threshold of 0.035, which handheld camera shake alone
+    // exceeds: in the same log a *static* board scored 0.09 to 0.17 against its own baseline.
+
+    /** Adds uniform noise, standing in for handheld shake and sensor grain. */
+    private fun noisy(frame: IntArray, amount: Int, seed: Int): IntArray {
+        var state = seed
+        return IntArray(frame.size) { index ->
+            state = state * 1_103_515_245 + 12_345
+            val jitter = ((state ushr 16) % (2 * amount + 1)) - amount
+            (frame[index] + jitter).coerceIn(0, 255)
+        }
+    }
+
+    @Test
+    fun aStableDiagramIsCapturedDespiteHandheldNoise() {
+        val detector = FrameChangeDetector()
+        val baseline = IntArray(1_024) { 235 }
+        val diagram = baseline.copyOf().also { values ->
+            for (index in 200 until 600) values[index] = 25
+        }
+        assertTrue(detector.commit(detector.evaluateSample(baseline, threshold = 0.21)))
+
+        // The same diagram, seen through a shaking camera on consecutive frames.
+        val first = detector.evaluateSample(noisy(diagram, amount = 14, seed = 1), threshold = 0.21)
+        val second = detector.evaluateSample(noisy(diagram, amount = 14, seed = 2), threshold = 0.21)
+
+        assertTrue("first frame should start the settle wait", !first.accepted)
+        assertTrue("a noisy but unchanged diagram must be accepted on the second frame", second.accepted)
+    }
+
+    @Test
+    fun aPersonCrossingIsStillRejectedByTheRelativeTest() {
+        val detector = FrameChangeDetector()
+        val baseline = IntArray(1_024) { 235 }
+        assertTrue(detector.commit(detector.evaluateSample(baseline, threshold = 0.21)))
+
+        // Walks across, then leaves: the board returns to what it was.
+        detector.evaluateSample(personAt(baseline, 100), threshold = 0.21)
+        val afterLeaving = detector.evaluateSample(baseline.copyOf(), threshold = 0.21)
+
+        assertTrue(!afterLeaving.accepted)
+        assertEquals("Frame is similar to the last committed board state.", afterLeaving.reason)
+    }
+
+    @Test
+    fun manualCaptureOverridesTheFilterEntirely() {
+        val detector = FrameChangeDetector()
+        val baseline = IntArray(1_024) { 235 }
+        assertTrue(detector.commit(detector.evaluateSample(baseline, threshold = 0.21)))
+        // Identical frame would normally be rejected outright.
+        assertTrue(!detector.evaluateSample(baseline.copyOf(), threshold = 0.21).accepted)
+
+        detector.forceNextCapture()
+
+        assertTrue(detector.evaluateSample(baseline.copyOf(), threshold = 0.21).accepted)
+    }
 }

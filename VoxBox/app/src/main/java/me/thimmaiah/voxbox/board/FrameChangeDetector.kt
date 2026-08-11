@@ -37,15 +37,22 @@ class FrameChangeDetector(
     private val sampleSide: Int = 32,
     private val centeredPixelThreshold: Int = 22,
     /**
-     * How still the scene has to be between two samples to count as settled. Deliberately
-     * well below any usable change threshold: chalk dust, hand tremor and sensor noise all
-     * have to pass, while a person who has moved on does not.
+     * How still two consecutive samples must be, *relative to* how far the board has moved from
+     * its committed state, before the change counts as settled.
+     *
+     * This was an absolute 0.035 and it was wrong. A field log showed a phone held by hand at a
+     * static board producing frame-to-frame differences of 0.09 to 0.17 from shake and sensor
+     * noise alone, so "settled" was effectively unreachable: a diagram sat on screen for twenty
+     * seconds and nine consecutive frames before it was finally captured. A ratio compares like
+     * with like — if the drift between two frames is small next to the change from the baseline,
+     * the new content is stable, however noisy the camera is.
      */
-    private val settleThreshold: Double = 0.035,
+    private val settleRatio: Double = 0.45,
 ) {
     private var lastAcceptedLuma: IntArray? = null
     private var pendingCandidate: PendingFrameCandidate? = null
     private var unsettledLuma: IntArray? = null
+    private var unsettledCount = 0
     private var nextCandidateToken = 1L
 
     fun evaluate(jpegBytes: ByteArray, threshold: Double): FrameChangeDecision {
@@ -73,6 +80,7 @@ class FrameChangeDetector(
             // Back at the committed state. Whatever raised the change has gone away again,
             // which is exactly what a person walking through frame looks like.
             unsettledLuma = null
+            unsettledCount = 0
             pendingCandidate = null
             return FrameChangeDecision(
                 accepted = false,
@@ -85,6 +93,7 @@ class FrameChangeDetector(
         val awaiting = unsettledLuma
         if (awaiting == null) {
             unsettledLuma = sample.copyOf()
+            unsettledCount = 1
             pendingCandidate = null
             return FrameChangeDecision(
                 accepted = false,
@@ -94,10 +103,14 @@ class FrameChangeDetector(
             )
         }
 
+        // A scene that never settles and a person crossing the board are the same signal, so no
+        // threshold can separate them. Automatic capture stays conservative and rejects both; the
+        // manual capture button covers the case where the student can see it matters.
         val settling = compareLuma(awaiting, sample, centeredPixelThreshold)
-        if (settling.score >= settleThreshold) {
+        if (settling.score >= settleRatio * metrics.score) {
             // Still moving between samples: someone is in front of the board, not new content.
             unsettledLuma = sample.copyOf()
+            unsettledCount += 1
             pendingCandidate = null
             return FrameChangeDecision(
                 accepted = false,
@@ -108,6 +121,7 @@ class FrameChangeDetector(
         }
 
         unsettledLuma = null
+        unsettledCount = 0
         return acceptedCandidate(
             sample = sample,
             accepted = true,
@@ -135,7 +149,20 @@ class FrameChangeDetector(
         lastAcceptedLuma = null
         pendingCandidate = null
         unsettledLuma = null
+        unsettledCount = 0
         nextCandidateToken = 1L
+    }
+
+    /**
+     * Captures the next frame whatever the comparison says.
+     *
+     * Backs the manual capture button: the filter is a cost control, and when the student can see
+     * something worth keeping their judgement outranks it.
+     */
+    fun forceNextCapture() {
+        lastAcceptedLuma = null
+        unsettledLuma = null
+        unsettledCount = 0
     }
 
     private fun acceptedCandidate(
