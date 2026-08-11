@@ -29,3 +29,6 @@ desktop.ini
 outputs/*.inspect.ndjson
 outputs/review1-render/
 outputs/redesign-device/
+tools/report-generator/node_modules/
+tools/report-generator/package-lock.json
+tools/report-generator/package.json
