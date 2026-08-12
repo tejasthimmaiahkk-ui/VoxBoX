@@ -2,7 +2,7 @@
 
 **Project title:** Structured Voice to Notes using AI
 **Application name:** VoxBox
-**Last updated:** 2026-08-11
+**Last updated:** 2026-08-12
 **Purpose of this file:** a single honest record of what exists, what does not, and what is
 believed to work but has never been proven. Keep it current — it is the input to the report's
 future-work chapter, and re-reading it is the cheapest bug-finding exercise available.
@@ -22,7 +22,9 @@ future-work chapter, and re-reading it is the cheapest bug-finding exercise avai
 | Lint | clean |
 | Deployed backend | live, verified against `/health` |
 | Field trials | 4 |
-| Report | 223 pages, generated |
+| Report | 384 pages — 200 narrative + 184 source appendices |
+| Report diagrams | 21, all generated from the system they describe (`tools/diagrams/`) |
+| Report screenshots | 21, captured from the physical device |
 
 ---
 
@@ -39,6 +41,10 @@ These have been exercised on the physical phone, not merely compiled.
 - Adaptive tuning visibly changing interval and threshold from measured speech pace.
 - Folder creation dialog.
 - Release build reaching the hosted proxy over HTTPS.
+- **Field trial 4, 12 Aug 2026 — the settle-gate fix confirmed.** A 92-second instrumented board
+  session accepted 3 frames and skipped 9, reaching revision 5. These are the first board frames
+  the system has ever accepted in the field; the three earlier trials accepted none. Captured as
+  `docs/screenshots/16-live-running.png` and reproduced as Figure S.8 in the report.
 
 ## 3. Done, tested, but never seen working in the field
 
@@ -47,7 +53,7 @@ Compiles and has unit tests, but no field session has confirmed the behaviour en
 
 | Item | Why it is unconfirmed |
 | --- | --- |
-| Diagram placement beside its text | No accepted board frame has occurred since the settle-gate fix, so the inline placement path has never actually run |
+| Diagram placement beside its text | Field trial 4 produced the first accepted frames, but the room was silent so no composition ran against them. The inline placement path still has not executed on real content. |
 | Diagram duplicate rejection by fingerprint | Same reason |
 | Transcript overlap de-duplication on real speech | Unit-tested against synthetic seams only; never checked against a lecture transcript |
 | Grounding guard on a real session | Tested against a scripted provider; never triggered by a live model |
@@ -100,10 +106,15 @@ Recorded because each was learned by getting it wrong, and each is cheap to repe
 
 ## 7. Next actions, in order
 
-1. Run one instrumented field session with diagnostics on and confirm the settle-gate fix lands
-   captures — this unblocks most of section 3.
-2. Verify diagram placement and duplicate rejection from that session.
-3. Rotate the client token.
-4. Build the labelled corpus and scorer (section 4, item 1).
-5. Remove the temporary debug log once field diagnosis is complete.
-6. Replace the debug signing configuration before any distribution.
+1. ~~Run one instrumented field session and confirm the settle-gate fix lands captures.~~
+   **Done, 12 Aug 2026: 3 kept, 9 skipped in 92 s.** The room was silent, so this proved the
+   capture path and not the composition path.
+2. Run the same session **with speech in the room**, so an accepted frame actually reaches
+   extraction and composition. This is what unblocks the rest of section 3.
+3. Verify diagram placement and duplicate rejection from that session.
+4. Rotate the client token.
+5. Build the labelled corpus and scorer (section 4, item 1).
+6. Remove the temporary debug log once field diagnosis is complete.
+7. Replace the debug signing configuration before any distribution.
+8. Update chapter 16 of the report (Future Implementation) as items above are completed —
+   the chapter is written to be revised, and `tools/report-generator/content3.js` holds it.

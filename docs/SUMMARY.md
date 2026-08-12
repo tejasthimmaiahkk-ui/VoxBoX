@@ -55,7 +55,7 @@ Six algorithms, none of which changed when the AI provider was migrated during d
 | Tests | 134 Android · 43 backend · 3 device · lint clean |
 | Backend | deployed and live |
 | Field trials | 4 |
-| Report | 223 pages |
+| Report | 384 pages: 200 narrative + 184 source, 21 diagrams, 21 screenshots |
 
 ## What is honestly not done
 
@@ -73,4 +73,6 @@ Six algorithms, none of which changed when the AI provider was migrated during d
 | `docs/REVIEW_1_HANDBOOK.md` | Review preparation and anticipated questions |
 | `docs/TEMPORARY_DEBUG_LOG.md` | Removal checklist for the diagnostic log |
 | `server/OPERATIONS.md` | Token and key rotation, error codes, rollback |
-| `outputs/VoxBox_Project_Report.docx` | The 223-page project report |
+| `outputs/VoxBox_Project_Report.docx` | The 384-page project report |
+| `tools/report-generator/` | Rebuilds the report; source appendices are read from the tree at build time |
+| `tools/diagrams/` | Regenerates all 21 report diagrams |

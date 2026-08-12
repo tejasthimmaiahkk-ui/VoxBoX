@@ -8,14 +8,20 @@
 const fs = require("fs");
 const path = require("path");
 const {
-  AlignmentType, BorderStyle, Document, Footer, Header, HeadingLevel, LevelFormat, NumberFormat,
-  Packer, PageBreak, PageNumber, Paragraph, ShadingType, Table, TableCell, TableRow,
+  AlignmentType, BorderStyle, Document, Footer, Header, HeadingLevel, ImageRun, LevelFormat,
+  NumberFormat, Packer, PageBreak, PageNumber, Paragraph, ShadingType, Table, TableCell, TableRow,
   TableOfContents, TextRun, WidthType,
 } = require("docx");
 
 const A = require("./content");
 const B = require("./content2");
 const C = require("./content3");
+const D = require("./content4");
+const E = require("./content5");
+const F = require("./content6");
+const G = require("./content7");
+const H = require("./content8");
+const I = require("./content9");
 
 const REPO = "D:/CollegeProject";
 const OUT = path.join(REPO, "outputs", "VoxBox_Project_Report.docx");
@@ -137,6 +143,112 @@ function note(text) {
   });
 }
 
+// ---------------------------------------------------------------- figures
+//
+// The text column is 9406 twips wide (A4 less the margins), which is 6.53 inches, which is
+// 627 pixels at the 96 dpi docx-js assumes. Figures are scaled to fit that and no wider.
+
+const TEXT_WIDTH_PX = 620;
+const FIGURES = [];   // { num, caption } in document order, for the List of Figures
+const TABLES = [];    // { num, caption } in document order, for the List of Tables
+
+/** Reads width and height straight out of a PNG IHDR chunk. */
+function pngSize(file) {
+  const b = fs.readFileSync(file);
+  if (b.length < 24 || b.readUInt32BE(0) !== 0x89504e47) throw new Error("not a PNG: " + file);
+  return { w: b.readUInt32BE(16), h: b.readUInt32BE(20), data: b };
+}
+
+function figure(num, file, caption, { maxW = TEXT_WIDTH_PX, maxH = 780 } = {}) {
+  const abs = path.isAbsolute(file) ? file : path.join(REPO, file);
+  const { w, h, data } = pngSize(abs);
+  let scale = Math.min(maxW / w, maxH / h, 1);
+  const width = Math.round(w * scale);
+  const height = Math.round(h * scale);
+  FIGURES.push({ num, caption });
+  return [
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { before: 200, after: 90 },
+      children: [new ImageRun({ type: "png", data, transformation: { width, height } })],
+    }),
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 260 },
+      children: [
+        new TextRun({ text: "Figure " + num + "  ", font: SANS, size: 18, bold: true, color: ACCENT }),
+        new TextRun({ text: caption, font: SANS, size: 18, italics: true, color: MUTED }),
+      ],
+    }),
+  ];
+}
+
+/** A row of phone screenshots, side by side, each with its own caption. */
+function shots(items, { perRow = 2, width = 236 } = {}) {
+  const out = [];
+  for (let i = 0; i < items.length; i += perRow) {
+    const row = items.slice(i, i + perRow);
+    const cells = row.map((it) => {
+      const abs = path.join(REPO, "docs/screenshots", it.file);
+      const { w, h, data } = pngSize(abs);
+      const height = Math.round(h * (width / w));
+      FIGURES.push({ num: it.num, caption: it.caption });
+      return new TableCell({
+        width: { size: Math.floor(9406 / perRow), type: WidthType.DXA },
+        margins: { top: 120, bottom: 120, left: 120, right: 120 },
+        borders: {
+          top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.NONE },
+          left: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE },
+        },
+        children: [
+          new Paragraph({
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 80 },
+            children: [new ImageRun({ type: "png", data, transformation: { width, height } })],
+          }),
+          new Paragraph({
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 0 },
+            children: [
+              new TextRun({ text: "Figure " + it.num + "  ", font: SANS, size: 17, bold: true, color: ACCENT }),
+              new TextRun({ text: it.caption, font: SANS, size: 17, italics: true, color: MUTED }),
+            ],
+          }),
+        ],
+      });
+    });
+    while (cells.length < perRow) {
+      cells.push(new TableCell({
+        width: { size: Math.floor(9406 / perRow), type: WidthType.DXA },
+        borders: {
+          top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.NONE },
+          left: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE },
+        },
+        children: [new Paragraph({ children: [] })],
+      }));
+    }
+    out.push(new Table({
+      columnWidths: new Array(perRow).fill(Math.floor(9406 / perRow)),
+      width: { size: 9406, type: WidthType.DXA },
+      rows: [new TableRow({ children: cells })],
+    }));
+    out.push(new Paragraph({ spacing: { after: 200 }, children: [] }));
+  }
+  return out;
+}
+
+function tableCaption(num, caption) {
+  TABLES.push({ num, caption });
+  return new Paragraph({
+    spacing: { before: 40, after: 160 },
+    alignment: AlignmentType.CENTER,
+    children: [
+      new TextRun({ text: "Table " + num + "  ", font: SANS, size: 18, bold: true, color: ACCENT }),
+      new TextRun({ text: caption, font: SANS, size: 18, italics: true, color: MUTED }),
+    ],
+  });
+}
+
 function render(blocks) {
   const out = [];
   blocks.forEach((b) => {
@@ -146,9 +258,13 @@ function render(blocks) {
     else if (b.p) out.push(para(b.p));
     else if (b.b) out.push(...bullets(b.b));
     else if (b.n) out.push(...numbered(b.n));
-    else if (b.table) out.push(...table(b.table));
-    else if (b.code) out.push(...codeBlock(b.code, b.caption));
+    else if (b.table) {
+      out.push(...table(b.table));
+      if (b.tnum) out.push(tableCaption(b.tnum, b.caption));
+    } else if (b.code) out.push(...codeBlock(b.code, b.caption));
     else if (b.note) out.push(note(b.note));
+    else if (b.fig) out.push(...figure(b.num, b.fig, b.caption, b.opts));
+    else if (b.shots) out.push(...shots(b.shots, b.opts));
     else if (b.pagebreak) out.push(new Paragraph({ children: [new PageBreak()] }));
   });
   return out;
@@ -352,7 +468,92 @@ function sourceListing(title, files, base) {
   return out;
 }
 
+// ---------------------------------------------------------------- generated registers
+//
+// These two appendices are extracted from the repository at build time rather than written by
+// hand, so they cannot drift out of step with the tree the way a hand-maintained list would.
+
+/** Every @Test in the suite, grouped by file, with its declared name. */
+function testRegister() {
+  const roots = [
+    path.join(REPO, "VoxBox/app/src/test/java"),
+    path.join(REPO, "VoxBox/app/src/androidTest/java"),
+  ];
+  const files = roots.flatMap((r) => (fs.existsSync(r) ? listFiles(r, ".kt") : []));
+  const out = [];
+  let total = 0;
+  files.sort((a, b) => path.basename(a).localeCompare(path.basename(b))).forEach((file) => {
+    const text = fs.readFileSync(file, "utf8").replace(/\r\n/g, "\n");
+    const names = [];
+    const lines = text.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      if (!/^\s*@Test\b/.test(lines[i])) continue;
+      for (let j = i + 1; j < Math.min(i + 5, lines.length); j++) {
+        const m = lines[j].match(/fun\s+`?([^`(]+)`?\s*\(/);
+        if (m) { names.push(m[1].trim()); break; }
+      }
+    }
+    if (!names.length) return;
+    total += names.length;
+    const suite = path.basename(file, ".kt");
+    out.push(new Paragraph({
+      spacing: { before: 240, after: 100 },
+      keepNext: true,
+      border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: RULE, space: 2 } },
+      children: [
+        new TextRun({ text: suite, font: MONO, size: 19, bold: true, color: ACCENT }),
+        new TextRun({ text: "   " + names.length + " tests", font: SANS, size: 16, color: MUTED }),
+      ],
+    }));
+    out.push(...table({
+      head: ["#", "Test"],
+      widths: [700, 8706],
+      rows: names.map((n, i) => [String(i + 1), n.replace(/([a-z])([A-Z])/g, "$1 $2")]),
+    }));
+  });
+  return { blocks: out, total, files: files.length };
+}
+
+/** Every Kotlin source file in the application, with its size. */
+function fileInventory() {
+  const base = path.join(REPO, "VoxBox/app/src/main/java/me/thimmaiah/voxbox");
+  const files = listFiles(base, ".kt");
+  const byPackage = new Map();
+  let totalLines = 0;
+  files.forEach((f) => {
+    const rel = path.relative(base, f).replace(/\\/g, "/");
+    const pkg = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "(root)";
+    const lines = fs.readFileSync(f, "utf8").replace(/\r\n/g, "\n").split("\n").length;
+    totalLines += lines;
+    if (!byPackage.has(pkg)) byPackage.set(pkg, []);
+    byPackage.get(pkg).push([path.basename(f), String(lines)]);
+  });
+  const out = [];
+  [...byPackage.keys()].sort().forEach((pkg) => {
+    const rows = byPackage.get(pkg);
+    const sub = rows.reduce((a, r) => a + Number(r[1]), 0);
+    out.push(new Paragraph({
+      spacing: { before: 240, after: 100 },
+      keepNext: true,
+      border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: RULE, space: 2 } },
+      children: [
+        new TextRun({ text: pkg + "/", font: MONO, size: 19, bold: true, color: ACCENT }),
+        new TextRun({ text: "   " + rows.length + " files, " + sub + " lines", font: SANS, size: 16, color: MUTED }),
+      ],
+    }));
+    out.push(...table({
+      head: ["File", "Lines"],
+      widths: [7806, 1600],
+      rows: rows.sort((a, b) => a[0].localeCompare(b[0])),
+    }));
+  });
+  return { blocks: out, totalLines, count: files.length };
+}
+
 // ---------------------------------------------------------------- document
+
+const TESTS = testRegister();
+const INVENTORY = fileInventory();
 
 const androidMain = listFiles(path.join(REPO, "VoxBox/app/src/main/java"), ".kt");
 const androidTest = [
@@ -371,50 +572,119 @@ const buildFiles = [
   path.join(REPO, "Dockerfile"),
 ].filter((f) => fs.existsSync(f));
 
+// Chapters are rendered first so that the figure and table registries are populated before the
+// List of Figures and List of Tables are generated; the front matter is prepended afterwards.
+const main = [
+  ...render([...A.CH_INTRO, ...H.INTRO_EXTRA]),
+  ...render([...A.CH_PROBLEM, ...G.PROBLEM_EXTRA]),
+  ...render([...A.CH_LITERATURE, ...H.LIT_EXTRA]),
+  ...render([...A.CH_REQUIREMENTS, ...G.REQ_EXTRA]),
+  ...render([...A.CH_SCOPE, ...I.SCOPE_EXTRA]),
+  ...render([...B.CH_DESIGN, ...G.DESIGN_EXTRA]),
+  ...render([...B.CH_ALGORITHMS, ...G.ALGO_EXTRA]),
+  ...render([...B.CH_IMPLEMENTATION, ...H.IMPL_EXTRA]),
+  ...render([...B.CH_UI, ...G.UI_EXTRA]),
+  ...render([...B.CH_BACKEND, ...H.BACKEND_EXTRA]),
+  ...render([...B.CH_SECURITY, ...G.SEC_EXTRA]),
+  ...render([...C.CH_TESTING, ...G.TEST_EXTRA]),
+  ...render(C.CH_CHALLENGES),
+  ...render([...C.CH_RESULTS, ...H.RESULTS_EXTRA]),
+  ...render(C.CH_LIMITATIONS),
+  ...render([...C.CH_FUTURE, ...G.FUTURE_EXTRA]),
+  ...render([...C.CH_CONCLUSION, ...I.CONCLUSION_EXTRA]),
+  ...render(C.CH_REFERENCES),
+
+  ...render(D.APP_SCHEMA),
+  ...render(D.APP_API),
+  ...render(D.APP_TESTS),
+  ...render(D.APP_TRIALS),
+  ...render(D.APP_MANUAL),
+  ...render(D.APP_GLOSSARY),
+  ...render(E.APP_TRACE),
+  ...render(E.APP_DECISIONS),
+  ...render(E.APP_WALKTHROUGH),
+  ...render(E.APP_SCREENS),
+  ...render(F.APP_DDL),
+  ...render(F.APP_PROMPTS),
+  ...render(F.APP_LOG),
+  ...render(F.APP_WALKED),
+
+  ...render(I.APP_GALLERY),
+
+  heading("Appendix T — Complete Test Register", 1),
+  para("Every automated test in the suite, listed by its declared name, extracted from the " +
+    "repository at the time this report was generated. The names are the tests' own: a test named " +
+    "personMovingThroughFrameIsNeverAccepted states its intent, and reading this appendix straight " +
+    "through is a reasonable way to understand what the system believes about itself."),
+  para(TESTS.total + " tests across " + TESTS.files + " files. Their source is reproduced in " +
+    "Appendix C, and the suites are discussed by concern in Appendix G and in Chapter 12."),
+  ...TESTS.blocks,
+
+  heading("Appendix U — Source File Inventory", 1),
+  para("Every Kotlin file in the application, grouped by package, with its length. " +
+    INVENTORY.count + " files, " + INVENTORY.totalLines + " lines. The complete source of each is " +
+    "reproduced in Appendix A; this inventory exists so that a reader can locate a file by " +
+    "responsibility without paging through the listing."),
+  ...INVENTORY.blocks,
+
+  heading("Appendix V — Android Application Source", 1),
+  para("The complete Kotlin source of the Android application, reproduced from the repository at " +
+    "the time this report was generated. Files are listed alphabetically by path. Line numbers are " +
+    "included so that the discussion in Chapters 7 and 13 can be followed against the code."),
+  ...sourceListing("V.1 Application Source Files", androidMain, path.join(REPO, "VoxBox/app/src/main/java/me/thimmaiah")),
+
+  heading("Appendix W — Backend Service Source", 1),
+  para("The proxy service and its contract test suite. The service is dependency-free Node.js: " +
+    "there is no web framework, and every route, validator and schema is visible in the single " +
+    "file below."),
+  ...sourceListing("W.1 Server and Tests", serverFiles, path.join(REPO, "server")),
+
+  heading("Appendix X — Test Suites", 1),
+  para("Unit and instrumentation tests. Every algorithm described in Chapter 7 has a corresponding " +
+    "suite here, and several tests encode a specific field failure so that it cannot recur."),
+  ...sourceListing("X.1 Android Test Source", androidTest, path.join(REPO, "VoxBox/app/src")),
+
+  heading("Appendix Y — Build and Deployment Configuration", 1),
+  para("Build scripts, the dependency catalogue, the Android manifest and the deployment blueprint."),
+  ...sourceListing("Y.1 Configuration Files", buildFiles, REPO),
+];
+
+// ---------------------------------------------------------------- lists of figures and tables
+
+function indexList(entries, label) {
+  if (!entries.length) return [];
+  return entries.map((e) => new Paragraph({
+    spacing: { after: 70, line: 260 },
+    tabStops: [{ type: "right", position: 9200, leader: "dot" }],
+    children: [
+      new TextRun({ text: label + " " + e.num, font: SANS, size: 19, bold: true, color: ACCENT }),
+      new TextRun({ text: "\t" + e.caption, font: SANS, size: 19, color: INK }),
+    ],
+  }));
+}
+
+function listOfFigures() {
+  return [
+    heading("List of Figures", 1),
+    para("Twenty-one diagrams and " + FIGURES.filter((f) => /^\d+\.\d+[a-z]$/.test(String(f.num))).length +
+      " annotated screenshots taken from the application running on a physical device. Every " +
+      "diagram in this report was generated from the system it describes rather than drawn by " +
+      "hand, so a change in the schema or the architecture is reflected the next time the report " +
+      "is built.",
+      { size: 19, italics: true, color: MUTED }),
+    ...indexList(FIGURES, "Figure"),
+    heading("List of Tables", 1),
+    ...indexList(TABLES, "Table"),
+  ];
+}
+
 const body = [
   ...titlePage(),
   ...signaturePages(),
   ...abstractPage(),
   ...tocPage(),
-  ...render(A.CH_INTRO),
-  ...render(A.CH_PROBLEM),
-  ...render(A.CH_LITERATURE),
-  ...render(A.CH_REQUIREMENTS),
-  ...render(A.CH_SCOPE),
-  ...render(B.CH_DESIGN),
-  ...render(B.CH_ALGORITHMS),
-  ...render(B.CH_IMPLEMENTATION),
-  ...render(B.CH_UI),
-  ...render(B.CH_BACKEND),
-  ...render(B.CH_SECURITY),
-  ...render(C.CH_TESTING),
-  ...render(C.CH_CHALLENGES),
-  ...render(C.CH_RESULTS),
-  ...render(C.CH_LIMITATIONS),
-  ...render(C.CH_FUTURE),
-  ...render(C.CH_CONCLUSION),
-  ...render(C.CH_REFERENCES),
-
-  heading("Appendix A — Android Application Source", 1),
-  para("The complete Kotlin source of the Android application, reproduced from the repository at " +
-    "the time this report was generated. Files are listed alphabetically by path. Line numbers are " +
-    "included so that the discussion in Chapters 7 and 13 can be followed against the code."),
-  ...sourceListing("A.1 Application Source Files", androidMain, path.join(REPO, "VoxBox/app/src/main/java/me/thimmaiah")),
-
-  heading("Appendix B — Backend Service Source", 1),
-  para("The proxy service and its contract test suite. The service is dependency-free Node.js: " +
-    "there is no web framework, and every route, validator and schema is visible in the single " +
-    "file below."),
-  ...sourceListing("B.1 Server and Tests", serverFiles, path.join(REPO, "server")),
-
-  heading("Appendix C — Test Suites", 1),
-  para("Unit and instrumentation tests. Every algorithm described in Chapter 7 has a corresponding " +
-    "suite here, and several tests encode a specific field failure so that it cannot recur."),
-  ...sourceListing("C.1 Android Test Source", androidTest, path.join(REPO, "VoxBox/app/src")),
-
-  heading("Appendix D — Build and Deployment Configuration", 1),
-  para("Build scripts, the dependency catalogue, the Android manifest and the deployment blueprint."),
-  ...sourceListing("D.1 Configuration Files", buildFiles, REPO),
+  ...listOfFigures(),
+  ...main,
 ];
 
 const doc = new Document({
