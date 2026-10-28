@@ -25,9 +25,12 @@ data class ChartSeries(val bar: Boolean, val values: List<Float>)
 
 private val flowHeader = Regex("^(flowchart|graph)(\\s+(LR|RL|TD|TB|BT))?\\s*$", RegexOption.IGNORE_CASE)
 private val arrow = Regex("\\s*(?:-->|---|==>|-\\.->)\\s*(?:\\|([^|]*)\\|\\s*)?")
-private val nodeToken = Regex("^([A-Za-z0-9_]+)\\s*(\\[\\[(.*)]]|\\[(.*)]|\\(\\((.*)\\)\\)|\\((.*)\\)|\\{(.*)})?$")
+// Every bracket is escaped, including closing ones. The JVM accepts a bare "}" or "]", so these
+// passed every unit test, but Android's ICU engine rejects them and the class failed to load,
+// crashing the reader the first time a live note contained a diagram.
+private val nodeToken = Regex("^([A-Za-z0-9_]+)\\s*(\\[\\[(.*)\\]\\]|\\[(.*)\\]|\\(\\((.*)\\)\\)|\\((.*)\\)|\\{(.*)\\})?$")
 private val quoted = Regex("\"([^\"]*)\"")
-private val numberList = Regex("\\[([^\\]]*)]")
+private val numberList = Regex("\\[([^\\]]*)\\]")
 
 fun parseDiagram(source: String): DiagramSpec? {
     val lines = source.lines().map(String::trim).filter { it.isNotEmpty() && !it.startsWith("%%") }

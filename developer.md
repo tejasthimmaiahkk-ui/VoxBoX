@@ -225,6 +225,9 @@ adb install -r app/build/outputs/apk/release/app-release.apk
   `[refine]` (failures), `[frame]`, `[consolidate]`, `[verify]`, `[tuning]`. Logs carry metadata
   and 60-char previews only, never full transcripts.
 - On Windows Git Bash, prefix adb commands that take device paths with `MSYS_NO_PATHCONV=1`.
+- **Regexes must be ICU-safe.** Unit tests run on the JVM, which accepts a bare `]` or `}`; Android's
+  ICU engine does not, and a failing top-level `Regex` crashes the class on first use. Escape every
+  bracket — this is how the built-in diagram parser crashed the reader on its first live note.
 - Reading a note's text off a device: `adb shell uiautomator dump` while scrolling the reader.
 
 ### Field test record (2026-10-28)
