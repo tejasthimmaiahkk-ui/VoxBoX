@@ -1205,10 +1205,7 @@ function noteInstructions(request) {
     // the block is part of the expected output, with the exact shape to copy.
     "Whenever the new evidence describes a process, sequence, cycle, transformation (X becomes Y) or " +
       "cause-and-effect chain with two or more steps, the delta MUST also contain one fenced diagram, written " +
-      "exactly like: ```mermaid
-flowchart TD
-  A[Parent nucleus] -->|emits alpha particle| B[Daughter nucleus]
-``` " +
+      "exactly like: ```mermaid\nflowchart TD\n  A[Parent nucleus] -->|emits alpha particle| B[Daughter nucleus]\n``` " +
       "with at most 8 nodes and plain-word labels. " +
       "When the speaker gives a simple trend or a few numeric values to compare, add a ```mermaid " +
       "xychart-beta block (title, x-axis \"name\" [labels], y-axis \"name\", line [values] or bar [values]) " +

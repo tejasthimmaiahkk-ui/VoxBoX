@@ -1239,7 +1239,7 @@ test("every note request asks for completeness and allows built-in diagrams", as
   await post(base, "/v1/notes/refine", noteRequest({ noteDetail: "concise" }));
   const system = sent.messages[0].content;
   assert.ok(system.includes("never drop a distinct point"));
-  assert.ok(system.includes("```mermaid flowchart TD"));
+  assert.ok(system.includes("MUST also contain one fenced diagram"));
   assert.ok(system.includes("xychart-beta"));
   assert.ok(!system.includes("prefer adding nothing"));
 });
