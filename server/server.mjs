@@ -1201,8 +1201,15 @@ function noteInstructions(request) {
       "definitions, numbers with their units, named people and discoveries, worked examples, causes, " +
       "comparisons and exceptions. Compress the wording, merge repetition, but never drop a distinct point.",
     // Built-in diagrams: the app draws these natively and Obsidian renders the same source.
-    "When the speaker describes a short process, sequence, cycle or cause-and-effect chain, add a " +
-      "```mermaid flowchart TD block with at most 8 nodes (A[Step] --> B[Next], labels in plain words). " +
+    // The first wording was "add a block when…" and the note model simply never did; it has to be told
+    // the block is part of the expected output, with the exact shape to copy.
+    "Whenever the new evidence describes a process, sequence, cycle, transformation (X becomes Y) or " +
+      "cause-and-effect chain with two or more steps, the delta MUST also contain one fenced diagram, written " +
+      "exactly like: ```mermaid
+flowchart TD
+  A[Parent nucleus] -->|emits alpha particle| B[Daughter nucleus]
+``` " +
+      "with at most 8 nodes and plain-word labels. " +
       "When the speaker gives a simple trend or a few numeric values to compare, add a ```mermaid " +
       "xychart-beta block (title, x-axis \"name\" [labels], y-axis \"name\", line [values] or bar [values]) " +
       "using only values from the evidence. Never draw a diagram for something the evidence does not describe, " +
