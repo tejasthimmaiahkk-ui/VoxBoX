@@ -1,0 +1,314 @@
+; College-format report outline. Lines starting with ';' are comments.
+; @old N.M        re-emits section N.M of the previous report as a numbered sub-section
+; @old N.M!       re-emits it without its own heading
+; !fig path | caption      !shots a.png,b.png | caption      !code file::function[:lines] | caption
+@chmap 1=1 2=1 3=1 4=2 5=1 6=2 7=2 8=2 9=2 10=2 11=2 12=3 13=4 14=3 15=4 16=4 17=4
+
+@front DECLARATION
+I, **[Student Name]**, Reg. No. **[Registration Number]**, a student of V Semester BCA, hereby declare that the project entitled **"VoxBox: An Intelligent Multimodal System for Continuous Lecture Note Generation Using Voice and Visual Content"** has been carried out and successfully completed by me during the academic year 2026–27 under the guidance of **[Mr./Ms. Project Guide Name]**, Assistant Professor, Department of Computer Applications (BCA), St. Francis College.
+
+I further declare that this project report is my original work and has not been submitted, either in full or in part, for the award of any degree, diploma, associateship, fellowship, or any other qualification of any other University or Institution.
+
+Place: Bengaluru
+
+Date:
+
+**[Student Name]**
+
+(Student Signature)
+
+**[Mr./Ms. Project Guide Name]**
+
+(Project Guide Signature)
+
+@front ACKNOWLEDGEMENT
+I would like to express my gratitude and appreciation to all those who gave me the possibility to complete this report.
+
+I take pleasure in expressing gratitude towards our institution for providing me the opportunity to work on this project as a part of my course. I would like to express my gratitude and sincere thanks to our management, Bro. Dr. Titus Anto, Director, for providing us with a congenial environment for studies. I would like to express my gratitude to the Principal, Dr. R N Subba Rao, for providing the right atmosphere at the institute.
+
+I express my heartfelt thanks to Ms. Sabitha S, Head of the Department, for being helpful throughout the project. I express my deep sense of gratitude to my project guide, **[Mr./Ms. Project Guide Name]**, Assistant Professor, for the unfailing encouragement, valuable guidance and suggestions given to me in the course of the project work. I also express my heartfelt thanks to my parents for being supportive in all my activities, without whom it would not have been possible for me to complete this project.
+
+**[Student Name]**
+
+@front TABLE OF CONTENTS
+@field TOC \h \z \t "VB Chapter,1,VB Section,2"
+
+@front LIST OF FIGURES
+@field TOC \h \z \t "Figure Caption,1"
+
+@front LIST OF TABLES
+@field TOC \h \z \t "Table Caption,1"
+
+@section-arabic
+@frontsame ABSTRACT
+A lecture exists only while it is being spoken. Students in Indian colleges, where a single teacher often addresses sixty or more learners in a noisy room, routinely lose part of an explanation while copying the board, and recordings are rarely replayed because finding one point in an hour of audio costs more time than the point is worth. Lecture capture and AI note-taking are a fast-growing part of the education-technology market, driven by cheap smartphones, accurate cloud speech recognition and large language models that can organise text; yet the commonly available tools each solve only one piece of the problem — recorders keep audio, transcription services keep words, scanner applications keep the board — and general AI assistants summarise without showing what evidence a statement came from. The objective of this project is a phone application, VoxBox, that listens to a lecture and watches the board at the same time and continuously writes structured, examinable notes that stay traceable to what was actually said and shown. The motivation is practical: to let a student attend to the explanation instead of transcribing it, and to make the resulting notes trustworthy enough to study from.
+
+The system is built as a native Android application in Kotlin with Jetpack Compose, CameraX, the AudioRecord API and a Room database, backed by a small Node.js proxy that holds the AI credentials and forwards requests to hosted speech, vision and language models through OpenRouter. Audio is captured continuously and cut into overlapping chunks at the speaker's natural pauses using an adaptive noise-floor voice-activity detector, so fast and slow speech are both split between clauses and silent chunks cost nothing. Board frames are compared on the device with an exposure-compensated luminance fingerprint so that only changed boards are uploaded. Each chunk is transcribed and merged into the note through an append-only delta protocol with optimistic revision checks; a grounding guard rejects generated text that the evidence does not support; evidence is kept on the phone and retried with back-off until a valid AI response arrives, so poor connectivity delays notes instead of losing them; and at the end of a session a consolidation pass merges topics the lecturer repeated. Simple processes are drawn as built-in diagrams. The key constraints were a phone's battery, storage and bandwidth, an untrusted network, and the requirement never to invent content. The work proceeded in stages: requirements and design, an audio-only prototype, the board pipeline, the note protocol, the backend, unit and device testing, and a field test against a recorded lecture under noise, movement and a network outage.
+
+@chapter 1 Introduction
+## Background of the Project
+@old 1.1 1.2 1.3 1.6
+
+## Problem Statement
+@old 2.1 2.2 2.5 2.6
+
+## Objectives of the Project
+The project set out to build a working system, not a demonstration of a single model. Its objectives were:
+
+1. To capture a lecture continuously on a phone — speech and, optionally, the board — for as long as the student keeps the session open, without losing words at chunk boundaries.
+2. To turn that evidence, while the lecture is in progress, into structured notes with headings, definitions, worked examples, equations and diagrams, written for revision rather than as a transcript.
+3. To keep every generated statement traceable to captured evidence and never to present invented content as something that was taught.
+4. To keep working in real classrooms: background noise, a lecturer whose pace changes, a phone that is moved or rotated, and an unreliable mobile network.
+5. To merge material the lecturer repeats for students who did not follow, so that the final note states each point once.
+6. To keep the student's data on the device by default, send only what changed, and keep the AI provider's credentials off the phone.
+7. To measure the result against the lecture itself, with an explicit success criterion, rather than against the developer's impression.
+
+@old 5.6
+
+## Scope of the Project
+@old 5.1 5.2 5.3 5.4 5.5 2.4
+
+## Methodology and approach
+The project followed an iterative, evidence-driven methodology. Each iteration began with a concrete failure observed in use, wrote down what the failure was and what would show it fixed, implemented the smallest change that addressed it, and then verified the change on a real device as well as in automated tests. The project log records each iteration; Chapter 4 summarises the lessons that recurred.
+
+The work was carried out in the following sequence:
+
+1. **Requirements and design.** Interviews with classmates and observation of real lectures produced the failure list in Section 1.2, which was turned into functional and non-functional requirements (Section 2.1) and an architecture that separates capture, evidence storage and note composition (Section 2.2).
+2. **Audio prototype.** Continuous capture with AudioRecord, chunking, transcription and a first note prompt established the end-to-end path.
+3. **Board pipeline.** CameraX capture, the on-device frame-change filter and diagram cropping were added so that only changed boards are processed.
+4. **Note protocol.** The append-only delta contract, revision checks and the grounding guard were introduced after early notes duplicated and invented sections.
+5. **Backend and deployment.** The proxy was written to hold credentials, enforce request budgets and validate every model response, and was deployed to a hosted service.
+6. **Robustness.** Pause-aware chunking, the adaptive noise gate, the offline-safe retry queue, end-of-session consolidation, rotation handling and zoom persistence were added in response to the field test.
+7. **Testing and evaluation.** Unit tests on the device logic and the backend, instrumented device tests, and a live test against a recorded lecture whose captions served as ground truth (Chapter 3).
+
+Tools used were Android Studio and Gradle for the application, Node.js for the backend, Git and GitHub for version control, Render for hosting, adb and logcat for device diagnosis, and Python for the report and diagram tooling.
+
+## Literature Survey
+@old 3.1 3.2 3.3 3.4 3.5 3.6
+The capability comparison in Table 1.7 can be summarised by scoring each class of tool on the ten capabilities, counting a full capability as one and a partial or manual one as a half. No existing class supports more than two of the ten; the gap is not in any single capability but in combining them during the lecture with the evidence kept alongside the output.
+
+!fig docs/diagrams/fig-literature-capabilities.png | Capabilities supported by each class of existing tool, scored from the comparison table
+@old 3.7 3.8 3.9
+
+@chapter 2 System Design and Implementation
+## System Requirements
+### Hardware and software requirements
+| Item | Requirement |
+|---|---|
+| Phone | Android 8.0 (API 26) or later; tested on Android 16 |
+| Camera | Rear camera with autofocus (Board mode only) |
+| Microphone | Built-in microphone; noise suppression used when the device offers it |
+| Storage | About 60 MB for the application; recovery audio uses about 1 MB per minute until processed |
+| Network | Mobile data or Wi-Fi; the app tolerates outages and resumes when the connection returns |
+| Backend | Node.js 22 service, deployable to any container host (Render used) |
+| AI services | OpenRouter account with access to the speech, vision and note models |
+| Development | Android Studio, JDK 17, Kotlin 2, Gradle; Node.js for the server tests |
+Table: Hardware and software requirements
+
+@old 4.1 4.2 4.3 4.4 4.5
+
+## System Design
+@old 6.1 6.2 6.3 6.4 6.5 6.6 6.7
+
+### User interface design
+@old 9.1! 9.2! 9.3! 9.4! 9.5! 9.6! 9.8! 9.9!
+
+## System Architecture / Module Design
+@old 6.9 6.10 6.11 6.12 10.1 10.2 10.3 10.4 10.5 10.6 10.7 11.1 11.2 11.3 11.5 11.6 11.7 11.8
+
+## ER Diagram, DFD
+@old 6.8
+### Data flow diagrams
+The context diagram in Chapter 1 shows what crosses the system boundary. The level-1 data flow diagram below decomposes the system into its processes and data stores: audio capture and chunking, frame capture and change detection, transcription, board extraction, note composition, and the local evidence and note stores.
+
+!fig docs/diagrams/fig-dfd-l1.png | Level-1 data flow diagram
+@old 4.6
+
+## Implementation
+@old 8.1 8.2 8.3 8.4 8.5 8.6 8.7 8.9 8.10 8.11
+
+### Core algorithms
+The system's behaviour rests on a small number of algorithms, each written to solve a failure observed in use. The first six were part of the previous release; the remaining five were added in this iteration in response to the field test described in Chapter 3.
+
+@old 7.1 7.2 7.3 7.4 7.5 7.6
+
+### Pause-aware chunking with an adaptive noise floor
+Earlier builds cut audio every twenty seconds regardless of what the speaker was doing, so a fast speaker was cut mid-word and a slow one mid-sentence. The recorder now classifies every 20-millisecond frame of microphone audio as speech or non-speech by comparing its root-mean-square energy with a running estimate of the room's noise floor. The floor follows the quietest recent frames quickly and rises only slowly, with a time constant of about twenty seconds, so a lecturer talking over a fan or a music bed does not drag it up to their own level; a frame counts as speech when it is at least twice the floor (about 6 dB). Once a chunk holds 16 seconds of audio, it is cut at the first 360-millisecond run of non-speech frames, and 28 seconds is a hard ceiling for a lecturer who never pauses. Each chunk still repeats the last two seconds of the previous one, so no clause is seen only as a fragment.
+
+The same classification gives every chunk a voiced duration. A chunk with less than 0.4 s of speech — the lecturer writing silently, or an empty room — is not sent for transcription at all, which removes a provider call without risking content. The first field run showed why the floor must be relative: an absolute minimum loudness, chosen for a phone held near the speaker, classified an entire lecture heard from a laptop across the room as silence. Only digital silence is now ruled out absolutely.
+
+### Offline-safe evidence queue
+A recovery WAV is written to private storage before each chunk is processed, and it is deleted only after the transcript has been stored and the AI has returned a valid note revision. Previously a failed request was retried twice within three seconds and the chunk was then left for manual recovery, appended without AI refinement. Retryable failures — timeouts, unreachable hosts, server errors and rate limits — are now retried with a growing delay (0.75 s, 2 s, 4 s and so on up to 30 s), and when the phone reports no network the worker waits for connectivity instead of spending attempts. Because the audio queue is a single ordered channel, later chunks wait behind the one being retried and the note is still built in lecture order once the network returns. The same rule applies to note refinement, so a transcript that was captured offline is still turned into proper notes. A failure the service marks as permanent, such as an exhausted budget, ends the wait immediately. After Stop, the queue keeps trying for 90 seconds before anything left is kept as a recovery file.
+
+!code VoxBox/app/src/main/java/me/thimmaiah/voxbox/session/CaptureSessionViewModel.kt::keepTryingWhileCapturing:46 | The network-aware retry used for transcription and note refinement
+
+### End-of-session consolidation
+Live note updates may only append, which is what keeps them safe to apply while the lecture continues; the price is that a topic the lecturer re-explains for students who did not follow arrives as a second section. When the student stops the session, the note is sent once to a consolidation endpoint that merges repeated topics under one heading and removes sentences that restate the same fact, while keeping every distinct fact, equation, image link and callout. The proxy rejects a result that loses a diagram link or shrinks the note below a third of its length, the pre-consolidation note is written to private storage first, and the verbatim transcript stays in the database, so a poor merge can always be undone.
+
+### Built-in diagrams
+For a short process or a simple trend the note model writes a fenced Mermaid block — a `flowchart` of at most eight steps or an `xychart-beta` with values from the evidence — instead of relying on a photograph of the board. The reader parses a deliberately small subset of the syntax and draws it natively in Compose: flows top to bottom, with branches and loops spelled out under each step, and charts as line or bar plots. Unsupported diagrams fall back to showing the source, and Obsidian renders the same block when a note is exported. Board photographs remain the right form for complex figures such as anatomy or circuits; they are now taken only when the student presses Capture now, and pieces that the vision model boxes separately are joined into one crop.
+
+### Camera stability: zoom and rotation
+Two defects made the board camera unreliable in use. The camera binding was keyed on the sampling interval, so every adaptive change of interval unbound and re-bound the camera, which reopens at 1× and silently discarded the student's zoom. Binding and sampling are now separate, the requested zoom is the source of truth, and the camera's reported zoom state is observed so a reopened camera is set straight back to it. Separately, rotating the phone recreated the activity and ended the session; the activity now handles orientation changes itself and Compose re-lays out in place, so capture continues.
+
+@old 7.8
+
+@chapter 3 Code Snippets and Testing
+## Important Code Snippets
+### Modules explanation with screenshots
+The application is organised as five modules that the student meets in this order: onboarding and consent, the home screen with capture setup, the live session, the note reader, and the library with settings. The screenshots below were taken on the test device.
+
+!shots docs/screenshots/01-onboarding-1.png,docs/screenshots/04-home.png | Onboarding (left) and the home screen with the capture choice (right)
+The onboarding screens explain what is recorded and where it goes before any permission is requested. The home screen offers Voice and Board capture; Board records audio as well and adds the camera.
+
+!shots docs/screenshots/05-capture-setup.png,docs/screenshots/14-live-board.png | Capture setup (left) and a live Board session (right)
+Capture setup chooses the note to continue or create, its folder, the note policy and an optional syllabus. The live screen shows the camera with its zoom slider, the frame counters and the living note as it is written.
+
+!shots docs/screenshots/15-live-tuning.png,docs/screenshots/16-live-running.png | Live tuning (left) and a running session (right)
+Tune exposes the frame interval and change threshold for unusual boards; by default both are adjusted automatically from the measured speech pace.
+
+!shots docs/screenshots/17-note-reader.png,docs/screenshots/18-library-populated.png | The note reader (left) and the library (right)
+The reader renders the note's Markdown, equations, tables, built-in diagrams and review flags; the library organises notes into nested folders.
+
+!shots docs/screenshots/08-settings.png,docs/screenshots/21-split-diagram-crops.png | Settings (left) and board crops from the first field run (right)
+The right-hand screenshot shows the defect that led to manual diagram capture: one diagram on the board was saved as three separate crops.
+
+!shots docs/screenshots/02-onboarding-2.png,docs/screenshots/03-onboarding-3.png | Onboarding: what is recorded (left) and the consent step (right)
+Consent is asked before the first session and can be withdrawn in Privacy; nothing is uploaded before it is given.
+
+!shots docs/screenshots/09-appearance.png,docs/screenshots/10-connection.png | Appearance settings (left) and the backend connection check (right)
+The connection screen calls the proxy's health endpoint and shows the live mode, models and the day's request budget, which is how a student can tell a network problem from a service problem.
+
+!shots docs/screenshots/11-privacy.png,docs/screenshots/13-diagnostics.png | Privacy controls (left) and the diagnostic log (right)
+The diagnostic log records metadata and short previews only, never full transcripts, and can be exported for a bug report.
+
+!shots docs/screenshots/19-new-folder.png,docs/screenshots/20-note-actions.png | Creating a nested folder (left) and note actions (right)
+Notes can be moved, renamed, exported as an Obsidian-ready Markdown archive with their diagram assets, or deleted.
+
+### Code snippets
+The snippets below are taken unchanged from the source files and show the core of each algorithm described in Section 2.5.
+
+!code VoxBox/app/src/main/java/me/thimmaiah/voxbox/audio/PcmAudioChunkRecorder.kt::append:30 | Pause-aware chunk accumulation: frames are classified while they are written
+!code VoxBox/app/src/main/java/me/thimmaiah/voxbox/audio/PcmAudioChunkRecorder.kt::classifyFrame | Adaptive noise floor and speech classification for one 20 ms frame
+!code VoxBox/app/src/main/java/me/thimmaiah/voxbox/board/FrameChangeDetector.kt::evaluateSample:44 | On-device frame-change decision
+!code VoxBox/app/src/main/java/me/thimmaiah/voxbox/audio/TranscriptOverlap.kt::trimRepeatedPrefix:40 | Removing the repeated words at a chunk seam
+!code VoxBox/app/src/main/java/me/thimmaiah/voxbox/notes/CaptureSessionDao.kt::applyGeneratedMarkdownUpdate:46 | Optimistic revision check before a note update is stored
+!code server/server.mjs::callConsolidateProvider:60 | Server-side consolidation and the checks applied to its result
+!code VoxBox/app/src/main/java/me/thimmaiah/voxbox/camera/VbCameraController.kt::onCameraZoom | Restoring the student's zoom when the camera reopens
+!code VoxBox/app/src/main/java/me/thimmaiah/voxbox/board/BoardExtraction.kt::mergeAdjacentRegions | Joining pieces of one diagram into a single crop
+
+## Testing Methodology
+@old 12.1 12.6
+### Live field test method
+The decisive test was a live one. The success criterion set for it was that the notes generated from a real lecture should cover at least 90 per cent of its examinable content without missing points, with summarising and the removal of repetition allowed; it was later relaxed to 80 per cent for a run in which the phone was deliberately pointed away for part of the time. The lecture chosen was *Nuclear Physics: Crash Course Physics #45*, a 10 minute 24 second video with a fast narrator, background music and animated board drawings — harder than a typical classroom on pace, easier on acoustics.
+
+The video was played on a laptop's speakers and the phone ran a Board session pointed at the screen. During the run the tester moved away, made noise, played background sound, rotated the phone, zoomed the camera, and switched the phone to airplane mode for about a minute. The video's own English captions, recorded line by line from the player as they appeared, served as the ground truth: 234 caption lines. The application's log was mirrored to logcat over adb, so each chunk's voiced duration, every retry, and the consolidation result could be read as the session ran. The final note was read from the device's accessibility tree and compared point by point with the captions.
+
+## Test Cases and Results
+@old 12.2 12.3 12.4 12.5 14.1
+
+### Unit and integration test results
+| Suite | Tests | Result |
+|---|---|---|
+| Android JVM unit tests (33 suites) | 143 | All passed |
+| Backend tests (node --test) | 46 | All passed |
+| Release build (assembleRelease) | — | Successful; installed on the test device |
+Table: Automated test results for this release
+
+### Test cases
+| ID | Test case | Expected result | Result |
+|---|---|---|---|
+| TC-01 | Speech-like audio with a 600 ms pause after 5 s | Chunk cut at the pause, about 5.4 s | Pass |
+| TC-02 | Continuous speech for 11 s with a 10 s ceiling | One chunk at exactly 10 s | Pass |
+| TC-03 | Near-silent audio and steady hum | Not counted as speech | Pass |
+| TC-04 | Transcription service unreachable | Retried with growing delay; never discarded while running | Pass |
+| TC-05 | Consolidation drops a diagram link | Rejected by the proxy; note unchanged | Pass |
+| TC-06 | Consolidation collapses the note | Rejected by the proxy; note unchanged | Pass |
+| TC-07 | Mermaid flowchart in a note | Parsed into nodes and labelled edges and drawn natively | Pass |
+| TC-08 | Unsupported Mermaid diagram | Shown as code | Pass |
+| TC-09 | Three adjacent diagram boxes and one distant box | Two crops | Pass |
+| TC-10 | Zoom to 2.5× then sampling interval changes | Zoom kept | Pass (device) |
+| TC-11 | Phone rotated during a session | Session continues | Fixed; awaiting device re-check |
+| TC-12 | Board mode selected on the home screen | Camera icon on the start button | Pass (device) |
+| TC-13 | Lecture heard from a laptop across a room | Chunks transcribed, not skipped as silence | Failed in run 1; pass after fix |
+| TC-14 | Live lecture coverage, full video | At least 90 per cent of points | Failed in run 1 (about 40 per cent) |
+| TC-15 | Live lecture coverage, 5:24–7:04 segment | At least 80 per cent of points | 9 of 12 points (75–80 per cent) |
+Table: Test case register for this release
+
+### Live test results
+The first full run failed its criterion, and the reasons are more useful than the score. Three defects were exposed. The first session was lost when the phone was tilted, because rotation recreated the activity. In the second, every audio chunk was discarded as silence, because the noise gate's absolute loudness floor was set for a phone near the speaker and the laptop's sound arrived far below it. In the third, audio was transcribed correctly but the note covered only about 40 per cent of the lecture's points: the server's "concise" instruction told the model that twenty seconds of speech is usually one or two bullets and that adding nothing is preferable, so numbers, names and worked examples were treated as padding. Duplicate headings were also left unmerged, and an unrelated passage of background speech entered the note.
+
+Each defect was fixed — rotation handled in place, speech detection made relative to the room, the note instruction rewritten so that brevity applies to wording and never to facts, off-topic speech excluded, and the consolidation checks adjusted — and a segment of the lecture (5:24 to 7:04, covering radioactivity and alpha decay, the part lost during the outage in the first run) was re-run.
+
+| Point in the lecture segment | Captured |
+|---|---|
+| Radioactivity as the decay of unstable nuclei with emitted particles | Yes |
+| Henri Becquerel, uranium mineral and the photographic plate | Yes |
+| The plate was covered by paper and the radiation passed through it | No |
+| Three groups of emissions distinguished by penetrating power | No |
+| Alpha decay loses two protons and two neutrons and becomes a new element | Yes |
+| Parent nucleus becomes a daughter nucleus and an alpha particle (helium nucleus) | Yes |
+| Cause: the nucleus is too large for the strong force to hold | Yes |
+| Radium to radon example, with the decay equation | Yes |
+| Transmutation | Yes |
+| Radon has an atomic number two lower and a mass number four lower | Yes |
+| Atomic and mass numbers balance on both sides | No |
+| The lost mass becomes kinetic energy, used in nuclear power | Yes |
+Table: Coverage of the re-run segment against the captions
+
+All six audio chunks of the re-run were transcribed, the smallest with 1.2 s of detected speech, and the consolidation pass merged five repeated topics. The end-of-session check flagged one statement whose direction of decay had been reversed by a transcription error. Nine of twelve points were captured, which is at the relaxed 80 per cent criterion but short of the original 90 per cent; the full video was not re-run after the fixes, and the recovery of audio captured during a network outage has unit-test evidence but has not yet been observed end to end on the device.
+
+@old 14.2 14.3 14.4 14.5 14.6
+
+@chapter 4 Conclusion and Future Enhancements
+## Conclusion
+### Summary of the project's objectives, methodology and key findings
+The project set out to capture a lecture continuously on a phone and turn speech and board into structured, evidence-traceable notes while the lecture is in progress, in real classroom conditions of noise, uneven pace, movement and unreliable connectivity (Section 1.3). It was carried out iteratively: each change began from a failure observed in use, was implemented as the smallest fix, and was verified both in automated tests and on a real device (Section 1.5).
+
+The key findings are four. First, a working end-to-end system exists: a native Android application and a validating backend proxy, with 143 device-logic tests and 46 backend tests passing. Second, the most effective engineering lever was deciding on the device what not to send — the frame filter, the speech gate and the delta protocol together keep cost proportional to what changed. Third, a model's output must be checked, not trusted: the grounding guard, the consolidation checks and the end-of-session review each caught real errors in the field. Fourth, measured against a real lecture, the first version covered only about 40 per cent of the content; after the defects the field test exposed were fixed, a re-run segment reached about 80 per cent. The decisive improvements came from the test itself, not from design-time reasoning.
+
+### Contribution and significance of the project
+The project's contribution is a design in which evidence and generated notes are stored separately and permanently, every note revision is an append checked against the revision it was based on, and nothing a model produces can overwrite what was captured. That design is what makes it safe to let a language model write study material at all, because any statement can be traced back to the transcript or board frame it came from, and anything the model invents can be detected and discarded. Its significance for students is practical: they can attend to the explanation instead of transcribing it, and the notes they receive survive noise, a dropped connection and a lecturer who repeats themselves. For the wider practice of building with AI models, the project documents a field-tested set of lessons — measure against reality, keep the evidence, check the output — that apply well beyond lecture notes.
+
+@old 17.1 17.2 17.3 17.4
+### Challenges encountered
+@old 13.1! 13.2! 13.3! 13.4! 13.5! 13.6! 13.7! 13.8! 13.9! 13.10! 13.11! 13.14!
+### Limitations
+@old 15.1! 15.3!
+In addition, the live test identified limits that remain: coverage of a fast lecture is at about 80 per cent rather than 90; a mis-transcribed sentence can reverse a fact, which the end-of-session check flags but does not correct; and offline recovery has not yet been observed end to end on the device.
+@old 17.5!
+
+## Future Enhancements
+@old 16.2! 16.4! 16.6!
+Beyond those, the field test suggests four concrete next steps: a second, independent pass over the transcript at the end of a session to find facts the live notes missed; speaker enrolment so that a lecturer's voice can be followed across chunks rather than chunk by chunk; on-device speech recognition as a fallback when the network is unavailable for long periods; and automatic framing of the board or projector so that the camera can find and follow it without the student aiming the phone.
+
+@front REFERENCES
+Android Developers. (2026). *CameraX overview*. Google. https://developer.android.com/media/camera/camerax
+
+Android Developers. (2026). *Handle configuration changes*. Google. https://developer.android.com/guide/topics/resources/runtime-changes
+
+Android Developers. (2026). *Save data in a local database using Room*. Google. https://developer.android.com/training/data-storage/room
+
+Android Developers. (2026). *AudioRecord*. Google. https://developer.android.com/reference/android/media/AudioRecord
+
+Ji, Z., Lee, N., Frieske, R., Yu, T., Su, D., Xu, Y., Ishii, E., Bang, Y. J., Madotto, A., & Fung, P. (2023). Survey of hallucination in natural language generation. *ACM Computing Surveys, 55*(12), Article 248. https://doi.org/10.1145/3571730
+
+Kiewra, K. A. (1985). Investigating notetaking and review: A depth of processing alternative. *Educational Psychologist, 20*(1), 23–32. https://doi.org/10.1207/s15326985ep2001_4
+
+Kung, H. T., & Robinson, J. T. (1981). On optimistic methods for concurrency control. *ACM Transactions on Database Systems, 6*(2), 213–226. https://doi.org/10.1145/319566.319567
+
+Martin, R. (2001). Noise power spectral density estimation based on optimal smoothing and minimum statistics. *IEEE Transactions on Speech and Audio Processing, 9*(5), 504–512. https://doi.org/10.1109/89.928915
+
+Mayer, R. E. (2009). *Multimedia learning* (2nd ed.). Cambridge University Press.
+
+Mermaid. (2026). *Flowchart syntax* and *XY chart*. https://mermaid.js.org/
+
+Mueller, P. A., & Oppenheimer, D. M. (2014). The pen is mightier than the keyboard: Advantages of longhand over laptop note taking. *Psychological Science, 25*(6), 1159–1168. https://doi.org/10.1177/0956797614524581
+
+OpenRouter. (2026). *API reference*. https://openrouter.ai/docs
+
+Radford, A., Kim, J. W., Xu, T., Brockman, G., McLeavey, C., & Sutskever, I. (2023). Robust speech recognition via large-scale weak supervision. In *Proceedings of the 40th International Conference on Machine Learning* (pp. 28492–28518). PMLR.
+
+Smith, R. (2007). An overview of the Tesseract OCR engine. In *Proceedings of the Ninth International Conference on Document Analysis and Recognition* (pp. 629–633). IEEE. https://doi.org/10.1109/ICDAR.2007.4376991
+
+Sohn, J., Kim, N. S., & Sung, W. (1999). A statistical model-based voice activity detection. *IEEE Signal Processing Letters, 6*(1), 1–3. https://doi.org/10.1109/97.736233
