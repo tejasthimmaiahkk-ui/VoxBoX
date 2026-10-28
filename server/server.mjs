@@ -37,6 +37,8 @@ const CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions";
  * pipelines share this one shape. `strict` json_schema keeps the response bound to the contracts
  * this proxy already validates.
  */
+export const FALLBACK_MODEL = process.env.VOXBOX_FALLBACK_MODEL || "google/gemini-3.1-flash-lite";
+
 async function callStructuredModel(options) {
   // Both measured note models occasionally abort mid-generation or return a half-written object.
   // One immediate retry converts most of those into a normal answer instead of a lost note update,
@@ -44,8 +46,15 @@ async function callStructuredModel(options) {
   try {
     return await callStructuredModelOnce(options);
   } catch (error) {
-    const transient = error instanceof RequestError &&
-      (error.code === "upstream_generation_failed" || error.code === "upstream_output_truncated");
+    if (!(error instanceof RequestError)) throw error;
+    // OpenRouter throttles per model: on 2026-10-28 the note model returned 429 for over half an
+    // hour while the verification model answered normally, so live notes stalled behind one
+    // throttled model. One attempt on a different model turns that into a normal answer.
+    if (error.code.endsWith("_rate_limited") && options.model !== FALLBACK_MODEL) {
+      console.error(`VoxBox ${options.kind} rate limited on ${options.model}; trying ${FALLBACK_MODEL}`);
+      return callStructuredModelOnce({ ...options, model: FALLBACK_MODEL });
+    }
+    const transient = error.code === "upstream_generation_failed" || error.code === "upstream_output_truncated";
     if (!transient) throw error;
     console.error(`VoxBox ${options.kind} retry after ${error.code}`);
     return callStructuredModelOnce(options);

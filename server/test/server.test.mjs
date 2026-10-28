@@ -1243,3 +1243,23 @@ test("every note request asks for completeness and allows built-in diagrams", as
   assert.ok(system.includes("xychart-beta"));
   assert.ok(!system.includes("prefer adding nothing"));
 });
+
+test("a rate-limited note model falls back to another model once", async () => {
+  const models = [];
+  const base = await start({
+    env: { OPENROUTER_API_KEY: "test", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+    fetchImpl: async (_url, options) => {
+      const body = JSON.parse(options.body);
+      models.push(body.model);
+      if (models.length === 1) {
+        return new Response(JSON.stringify({ error: { message: "Provider returned error", code: 429 } }), { status: 429 });
+      }
+      return consolidateReply(REPEATED_NOTE)();
+    },
+  });
+  // Consolidation runs on the note model, which is the one OpenRouter throttled in the field.
+  const response = await post(base, "/v1/notes/consolidate", { sessionId: "s", requestId: "fb-1", noteMarkdown: REPEATED_NOTE });
+  assert.equal(response.status, 200);
+  assert.equal(models.length, 2);
+  assert.notEqual(models[0], models[1]);
+});
