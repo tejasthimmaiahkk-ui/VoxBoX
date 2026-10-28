@@ -1,6 +1,9 @@
 package me.thimmaiah.voxbox.camera
 
+import androidx.camera.core.ZoomState
 import androidx.camera.view.CameraController
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.Observer
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,9 +18,19 @@ import kotlinx.coroutines.flow.asStateFlow
  * Bounds come from `ZoomState`, never a hardcoded maximum. Phones with an ultra-wide lens report
  * a minimum below 1.0, and clamping to 1.0 would remove the widest setting — the one most useful
  * for fitting a whole board in frame.
+ *
+ * The user's chosen ratio is the source of truth, not the camera. CameraX reopens at 1× whenever
+ * the controller is rebound (pause/resume, a sampling-interval change), which used to drop the
+ * student's zoom and lose the board. [ZoomState] is observed so a reopened camera is put straight
+ * back to [desired], and the controller's own pinch-to-zoom is disabled so only this class moves it.
  */
-class VbCameraController {
+class VbCameraController(initialRatio: Float? = null) {
     private var controller: CameraController? = null
+    private var observer: Observer<ZoomState>? = null
+
+    /** What the user last asked for; null until they zoom, so the camera's default stands. */
+    var desired: Float? = initialRatio
+        private set
 
     private val _zoom = MutableStateFlow(1f)
     val zoom: StateFlow<Float> = _zoom.asStateFlow()
@@ -36,23 +49,30 @@ class VbCameraController {
 
     val hasRange: Boolean get() = _range.value.second > _range.value.first
 
-    fun bind(controller: CameraController) {
+    fun bind(controller: CameraController, owner: LifecycleOwner) {
+        unbind()
         this.controller = controller
-        controller.zoomState.value?.let { state ->
-            _range.value = state.minZoomRatio to state.maxZoomRatio
-            _zoom.value = state.zoomRatio
-        }
+        controller.isPinchToZoomEnabled = false
+        val zoomObserver = Observer<ZoomState> { state -> onCameraZoom(state) }
+        observer = zoomObserver
+        controller.zoomState.observe(owner, zoomObserver)
     }
 
-    /** Re-reads the real bounds once the camera has actually opened and reported them. */
-    fun refreshRange() {
-        controller?.zoomState?.value?.let { state ->
-            _range.value = state.minZoomRatio to state.maxZoomRatio
+    private fun onCameraZoom(state: ZoomState) {
+        _range.value = state.minZoomRatio to state.maxZoomRatio
+        val want = desired?.coerceIn(state.minZoomRatio, state.maxZoomRatio)
+        if (want != null && kotlin.math.abs(state.zoomRatio - want) > 0.01f) {
+            // A reopened camera reports its default; restore the user's framing instead.
+            runCatching { controller?.setZoomRatio(want) }
+            _zoom.value = want
+        } else {
             _zoom.value = state.zoomRatio
         }
     }
 
     fun unbind() {
+        observer?.let { controller?.zoomState?.removeObserver(it) }
+        observer = null
         controller = null
     }
 
@@ -77,6 +97,7 @@ class VbCameraController {
     private fun applyRatio(requested: Float) {
         val (min, max) = _range.value
         val ratio = requested.coerceIn(min, max)
+        desired = ratio
         if (ratio == _zoom.value) return
         runCatching { controller?.setZoomRatio(ratio) }
         _zoom.value = ratio

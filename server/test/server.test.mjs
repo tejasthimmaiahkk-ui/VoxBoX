@@ -1188,3 +1188,41 @@ test("a short delta is left alone, because short text cannot be scored fairly", 
 
   assert.equal((await response.json()).markdownDelta, "- Noted.");
 });
+
+function consolidateReply(markdown) {
+  return async () => new Response(JSON.stringify({
+    choices: [{ message: { content: JSON.stringify({ markdown, mergedTopics: ["Stacks"], warnings: [] }) } }],
+  }), { status: 200, headers: { "content-type": "application/json" } });
+}
+
+const REPEATED_NOTE = "# Stacks\n\n- LIFO order.\n- push adds on top.\n\n![stack](assets/a-1.jpg)\n\n## Stacks again\n\n- LIFO: last in, first out.\n- pop removes the top.\n";
+
+test("consolidation merges repeats but keeps every diagram link", async () => {
+  const merged = "# Stacks\n\n- LIFO: last in, first out.\n- push adds on top; pop removes the top.\n\n![stack](assets/a-1.jpg)\n";
+  const base = await start({
+    env: { OPENROUTER_API_KEY: "provider-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+    fetchImpl: consolidateReply(merged),
+  });
+  const response = await post(base, "/v1/notes/consolidate", { sessionId: "s", requestId: "c-1", noteMarkdown: REPEATED_NOTE });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.markdown, merged);
+  assert.deepEqual(body.mergedTopics, ["Stacks"]);
+});
+
+test("consolidation that drops a diagram or collapses the note is rejected", async () => {
+  const lostImage = await start({
+    env: { OPENROUTER_API_KEY: "provider-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+    fetchImpl: consolidateReply("# Stacks\n\n- LIFO: last in, first out; push adds on top; pop removes the top item.\n"),
+  });
+  const first = await post(lostImage, "/v1/notes/consolidate", { sessionId: "s", requestId: "c-2", noteMarkdown: REPEATED_NOTE });
+  assert.equal(first.status, 502);
+  assert.equal((await first.json()).error.retryable, false);
+
+  const collapsed = await start({
+    env: { OPENROUTER_API_KEY: "provider-secret", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+    fetchImpl: consolidateReply("# Stacks\n"),
+  });
+  const second = await post(collapsed, "/v1/notes/consolidate", { sessionId: "s", requestId: "c-3", noteMarkdown: REPEATED_NOTE });
+  assert.equal(second.status, 502);
+});

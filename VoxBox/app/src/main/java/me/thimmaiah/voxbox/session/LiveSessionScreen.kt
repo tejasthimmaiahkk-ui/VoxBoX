@@ -48,6 +48,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -248,7 +250,9 @@ private fun BoardPreview(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val zoomController = remember { VbCameraController() }
+    // The ratio survives recomposition and configuration changes; the controller re-applies it.
+    var savedZoom by rememberSaveable { mutableStateOf(0f) }
+    val zoomController = remember { VbCameraController(savedZoom.takeIf { it > 0f }) }
     val cameraController = remember(context) {
         LifecycleCameraController(context).apply {
             cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
@@ -261,38 +265,45 @@ private fun BoardPreview(
     var lastZoomAt by remember { mutableStateOf(0L) }
     var readoutFaded by remember { mutableStateOf(true) }
 
-    DisposableEffect(cameraController, lifecycleOwner, intervalMs) {
-        val handler = Handler(Looper.getMainLooper())
-        var sampler: Runnable? = null
+    // Binding and sampling are separate effects on purpose. Keying the camera binding on the
+    // interval meant every adaptive-sampling change unbound and rebound the camera, which reopens
+    // at 1× and silently threw away the student's zoom on the board.
+    DisposableEffect(cameraController, lifecycleOwner) {
         runCatching {
             cameraController.bindToLifecycle(lifecycleOwner)
-            zoomController.bind(cameraController)
-            zoomController.refreshRange()
-            sampler = object : Runnable {
-                override fun run() {
-                    if (!captureInFlight) {
-                        captureInFlight = true
-                        captureFrame(
-                            context = context,
-                            controller = cameraController,
-                            onSaved = { file, at ->
-                                captureInFlight = false
-                                onFrame(file, at)
-                            },
-                            onError = { captureInFlight = false },
-                        )
-                    }
-                    handler.postDelayed(this, intervalMs)
-                }
-            }.also { handler.postDelayed(it, 1_200) }
+            zoomController.bind(cameraController, lifecycleOwner)
         }
         onDispose {
-            sampler?.let(handler::removeCallbacks)
             zoomController.unbind()
             cameraController.unbind()
         }
     }
+    val currentInterval by rememberUpdatedState(intervalMs)
+    val currentOnFrame by rememberUpdatedState(onFrame)
+    DisposableEffect(cameraController) {
+        val handler = Handler(Looper.getMainLooper())
+        val sampler = object : Runnable {
+            override fun run() {
+                if (!captureInFlight) {
+                    captureInFlight = true
+                    captureFrame(
+                        context = context,
+                        controller = cameraController,
+                        onSaved = { file, at ->
+                            captureInFlight = false
+                            currentOnFrame(file, at)
+                        },
+                        onError = { captureInFlight = false },
+                    )
+                }
+                handler.postDelayed(this, currentInterval)
+            }
+        }
+        handler.postDelayed(sampler, 1_200)
+        onDispose { handler.removeCallbacks(sampler) }
+    }
     LaunchedEffect(zoom) {
+        zoomController.desired?.let { savedZoom = it }
         lastZoomAt = System.currentTimeMillis()
         readoutFaded = false
         kotlinx.coroutines.delay(1_200)

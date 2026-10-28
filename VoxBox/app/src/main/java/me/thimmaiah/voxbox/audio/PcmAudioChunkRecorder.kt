@@ -23,11 +23,23 @@ data class RecordedAudioChunk(
     val offsetMs: Long,
     val durationMs: Long,
     val wavBytes: ByteArray,
+    /**
+     * How much of the chunk rose clearly above the running noise floor. Near-silent chunks (a
+     * lecturer writing on the board, a pause) are not worth a transcription call.
+     */
+    val voicedMs: Long = durationMs,
 )
 
 class PcmAudioChunkRecorder(
     private val scope: CoroutineScope,
-    private val chunkDurationMs: Long = 20_000,
+    /** Hard ceiling: a lecturer who never pauses still gets a chunk this often. */
+    private val chunkDurationMs: Long = 28_000,
+    /**
+     * After this much audio the recorder starts looking for a pause to cut at, so a fast or slow
+     * speaker is split between clauses instead of at a fixed 20-second mark mid-word.
+     */
+    private val softChunkDurationMs: Long = 16_000,
+    private val pauseMs: Long = 360,
     /**
      * How much of the previous chunk each chunk repeats. Two seconds comfortably contains a
      * spoken clause, which is the unit that was being lost at the seam.
@@ -148,6 +160,8 @@ class PcmAudioChunkRecorder(
             minimumUsefulBytes = minimumUsefulBytes,
             sampleRate = sampleRate,
             overlapBytes = (bytesPerSecond * overlapMs / 1_000).toInt(),
+            softTargetBytes = evenBytes(bytesPerSecond * softChunkDurationMs / 1_000),
+            pauseBytes = evenBytes(bytesPerSecond * pauseMs / 1_000),
         )
         while (job?.isActive == true && !requestedStop) {
             val count = activeRecorder.read(readBuffer, 0, readBuffer.size, AudioRecord.READ_BLOCKING)
@@ -160,6 +174,8 @@ class PcmAudioChunkRecorder(
         }
         accumulator.finish()?.let(onChunk)
     }
+
+    private fun evenBytes(value: Long): Int = (value.toInt() / 2) * 2
 }
 
 /**
@@ -173,12 +189,20 @@ class PcmAudioChunkRecorder(
  * twice, so no word is only ever seen as a fragment, and the duplicate text is removed afterwards
  * by [trimRepeatedPrefix]. Offsets stay true to the recording clock: a chunk's offset is where its
  * *new* audio begins, not where its overlap does.
+ *
+ * Boundaries follow the speaker. Every 20 ms frame is compared against an adaptive noise floor
+ * (it falls quickly to quiet and rises slowly under steady fan or crowd noise); once a chunk
+ * passes [softTargetBytes] it is cut at the first [pauseBytes] run of non-speech frames, and
+ * [targetBytes] is the hard ceiling for a lecturer who never stops. The same classification
+ * gives each chunk its [RecordedAudioChunk.voicedMs].
  */
 internal class PcmChunkAccumulator(
     private val targetBytes: Int,
     private val minimumUsefulBytes: Int,
     private val sampleRate: Int,
     private val overlapBytes: Int = 0,
+    private val softTargetBytes: Int = targetBytes,
+    private val pauseBytes: Int = 0,
     private val idFactory: () -> String = { UUID.randomUUID().toString() },
 ) {
     private val pending = ByteArrayOutputStream(targetBytes)
@@ -186,12 +210,21 @@ internal class PcmChunkAccumulator(
     private var carriedBytes = 0
     private var finished = false
 
+    private val frameBytes = maxOf(2, sampleRate * 2 / 50 / 2 * 2)
+    private val frame = ByteArray(frameBytes)
+    private var frameFill = 0
+    private var noiseFloor = -1.0
+    private var voicedBytes = 0
+    private var quietRunBytes = 0
+
     init {
         require(targetBytes > 0 && targetBytes % 2 == 0)
         require(minimumUsefulBytes in 2..targetBytes && minimumUsefulBytes % 2 == 0)
         require(sampleRate > 0)
         require(overlapBytes >= 0 && overlapBytes % 2 == 0)
         require(overlapBytes < targetBytes) { "Overlap must leave room for new audio." }
+        require(softTargetBytes in 2..targetBytes)
+        require(pauseBytes >= 0)
     }
 
     fun append(bytes: ByteArray, offset: Int = 0, count: Int = bytes.size - offset): List<RecordedAudioChunk> {
@@ -201,10 +234,21 @@ internal class PcmChunkAccumulator(
         var sourceOffset = offset
         val sourceEnd = offset + count
         while (sourceOffset < sourceEnd) {
-            val writeCount = minOf(sourceEnd - sourceOffset, targetBytes - pending.size())
+            val writeCount = minOf(
+                sourceEnd - sourceOffset,
+                targetBytes - pending.size(),
+                frameBytes - frameFill,
+            )
             pending.write(bytes, sourceOffset, writeCount)
+            System.arraycopy(bytes, sourceOffset, frame, frameFill, writeCount)
+            frameFill += writeCount
             sourceOffset += writeCount
-            if (pending.size() == targetBytes) chunks += takeChunk()
+            if (frameFill == frameBytes) {
+                classifyFrame()
+                frameFill = 0
+            }
+            val atPause = pauseBytes > 0 && pending.size() >= softTargetBytes && quietRunBytes >= pauseBytes
+            if (pending.size() == targetBytes || atPause) chunks += takeChunk()
         }
         return chunks
     }
@@ -216,6 +260,21 @@ internal class PcmChunkAccumulator(
         // emitting it again would duplicate the tail of the lecture rather than extend it.
         val newBytes = pending.size() - carriedBytes
         return if (newBytes >= minimumUsefulBytes) takeChunk() else null
+    }
+
+    private fun classifyFrame() {
+        val rms = frameRms(frame, frameBytes)
+        noiseFloor = when {
+            noiseFloor < 0 -> rms
+            rms < noiseFloor -> noiseFloor * 0.7 + rms * 0.3
+            else -> noiseFloor * 0.995 + rms * 0.005
+        }
+        if (rms > maxOf(noiseFloor * SPEECH_OVER_FLOOR, MIN_SPEECH_RMS)) {
+            voicedBytes += frameBytes
+            quietRunBytes = 0
+        } else {
+            quietRunBytes += frameBytes
+        }
     }
 
     private fun takeChunk(): RecordedAudioChunk {
@@ -234,11 +293,34 @@ internal class PcmChunkAccumulator(
             offsetMs = (emittedDurationMs - overlapMs).coerceAtLeast(0),
             durationMs = duration,
             wavBytes = encodePcm16MonoWav(pcm, sampleRate),
+            voicedMs = pcmDurationMs(minOf(voicedBytes, pcm.size), sampleRate),
         )
         emittedDurationMs += duration - overlapMs
         carriedBytes = if (overlapBytes > 0) carried else 0
+        voicedBytes = 0
+        quietRunBytes = 0
         return chunk
     }
+
+    private companion object {
+        /** About +8 dB over the floor: a voice carries over a fan, steady hum does not. */
+        const val SPEECH_OVER_FLOOR = 2.5
+        /** Below this a frame is silence on any phone microphone, whatever the floor says. */
+        const val MIN_SPEECH_RMS = 120.0
+    }
+}
+
+internal fun frameRms(pcm: ByteArray, length: Int): Double {
+    var sum = 0.0
+    var samples = 0
+    var i = 0
+    while (i + 1 < length) {
+        val sample = ((pcm[i + 1].toInt() shl 8) or (pcm[i].toInt() and 0xFF)).toShort().toDouble()
+        sum += sample * sample
+        samples++
+        i += 2
+    }
+    return if (samples == 0) 0.0 else kotlin.math.sqrt(sum / samples)
 }
 
 internal fun pcmDurationMs(byteCount: Int, sampleRate: Int): Long =

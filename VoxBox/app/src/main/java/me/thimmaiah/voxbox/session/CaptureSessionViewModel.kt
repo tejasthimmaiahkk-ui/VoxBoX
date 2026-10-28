@@ -4,6 +4,8 @@ import android.Manifest
 import android.app.Application
 import android.content.pm.PackageManager
 import android.net.Uri
+import me.thimmaiah.voxbox.network.NetworkMonitor
+import me.thimmaiah.voxbox.network.offlineBackoffMs
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -169,6 +171,15 @@ class CaptureSessionViewModel(
     private val transcriptionClient: AudioTranscriptionClient = HttpAudioTranscriptionClient()
     private val noteClient: NoteRefinementClient = HttpNoteRefinementClient()
     private val verificationClient: NoteVerificationClient = HttpNoteVerificationClient()
+    private val consolidationClient = HttpNoteConsolidationClient()
+    private val networkMonitor = NetworkMonitor(application)
+
+    /**
+     * While capture runs, retryable failures wait for the network indefinitely; after Stop they
+     * get until this deadline, so a student leaving a dead-zone classroom is not stuck on
+     * "Finishing…" forever. Anything still unsent then stays as a private recovery WAV.
+     */
+    @Volatile private var stopDrainDeadline: Long? = null
     private val boardCoordinator = BoardExtractionCoordinator(
         remoteClient = HttpBoardExtractionClient(),
         offlineClient = MlKitBoardExtractionClient(),
@@ -440,6 +451,7 @@ class CaptureSessionViewModel(
         }
         if (_uiState.value.stage != LiveCaptureStage.RUNNING || stopJob?.isActive == true) return
         _uiState.update { it.copy(stage = LiveCaptureStage.STOPPING, status = "Finishing queued audio and frames…") }
+        stopDrainDeadline = System.currentTimeMillis() + STOP_DRAIN_GRACE_MS
         stopJob = viewModelScope.launch {
             try {
                 // The recorder callback can enqueue one final partial WAV before this returns.
@@ -570,6 +582,19 @@ class CaptureSessionViewModel(
     }
 
     private fun enqueueAudio(chunk: RecordedAudioChunk) {
+        // A chunk with almost no frame above the noise floor is the lecturer writing in silence,
+        // or a quiet room. Transcribing it costs a provider call and returns nothing useful.
+        if (chunk.voicedMs < MIN_VOICED_MS_FOR_TRANSCRIPTION) {
+            VbDebugLog.log(
+                "transcribe",
+                "skipped quiet chunk offset=${chunk.offsetMs} durationMs=${chunk.durationMs} voicedMs=${chunk.voicedMs}",
+            )
+            return
+        }
+        VbDebugLog.log(
+            "audio",
+            "chunk offset=${chunk.offsetMs} durationMs=${chunk.durationMs} voicedMs=${chunk.voicedMs}",
+        )
         val queued = storeRecoverableAudio(chunk)
         _uiState.update {
             it.copy(
@@ -916,6 +941,12 @@ class CaptureSessionViewModel(
             )
         } else {
             try {
+                keepTryingWhileCapturing(
+                    what = "note update",
+                    retryable = { error ->
+                        error is NoteRefinementException && (error.failure?.retryable ?: (error.cause != null))
+                    },
+                ) {
                 noteClient.refine(
                     NoteRefinementRequest(
                         requestId = requestId,
@@ -941,6 +972,9 @@ class CaptureSessionViewModel(
                         customInstruction = state.customInstruction,
                     ),
                 )
+                }
+            } catch (error: CancellationException) {
+                throw error
             } catch (error: Exception) {
                 VbDebugLog.log(
                     "refine",
@@ -1242,38 +1276,68 @@ class CaptureSessionViewModel(
         sessionId: String,
         chunk: QueuedAudioChunk,
         wavBytes: ByteArray,
-    ): AudioTranscription {
-        var lastFailure: Exception? = null
-        for (attempt in 0..TRANSCRIPTION_RETRY_DELAYS_MS.size) {
-            if (attempt > 0) {
-                val delayMs = TRANSCRIPTION_RETRY_DELAYS_MS[attempt - 1]
-                _uiState.update {
-                    it.copy(
-                        status = "Retrying audio at ${formatTimestamp(chunk.offsetMs)} " +
-                            "(${attempt + 1}/${TRANSCRIPTION_RETRY_DELAYS_MS.size + 1})…",
-                    )
-                }
-                delay(delayMs)
-            }
+    ): AudioTranscription = keepTryingWhileCapturing(
+        what = "audio at ${formatTimestamp(chunk.offsetMs)}",
+        // An exhausted quota, a rejected credential or a rejected request cannot succeed on a
+        // second attempt. Retrying would only delay the warning and retain more audio.
+        retryable = { error -> (error as? AudioTranscriptionException)?.retryable ?: true },
+    ) {
+        transcriptionClient.transcribe(
+            sessionId = sessionId,
+            chunkId = chunk.id,
+            offsetMs = chunk.offsetMs,
+            wavBytes = wavBytes,
+        )
+    }
+
+    /**
+     * Runs [block] until it succeeds, waiting out poor connectivity instead of discarding work.
+     *
+     * Evidence is already on disk (recovery WAV, persisted transcript), so waiting costs nothing
+     * but time, and the single ordered audio queue means later chunks wait behind this one and the
+     * note is still built in lecture order once the network returns. Only a non-retryable failure,
+     * or Stop's grace period running out, ends the wait early.
+     */
+    private suspend fun <T> keepTryingWhileCapturing(
+        what: String,
+        retryable: (Exception) -> Boolean,
+        block: suspend () -> T,
+    ): T {
+        var attempt = 0
+        while (true) {
             try {
-                return transcriptionClient.transcribe(
-                    sessionId = sessionId,
-                    chunkId = chunk.id,
-                    offsetMs = chunk.offsetMs,
-                    wavBytes = wavBytes,
-                )
+                return block()
             } catch (error: CancellationException) {
                 throw error
-            } catch (error: AudioTranscriptionException) {
-                lastFailure = error
-                // An exhausted quota, a rejected credential or a rejected request cannot succeed on
-                // a second attempt. Retrying would only delay the warning and retain more audio.
-                if (!error.retryable) throw error
             } catch (error: Exception) {
-                lastFailure = error
+                if (!retryable(error) || !mayKeepWaiting()) throw error
+                val waitMs = offlineBackoffMs(attempt++)
+                val online = networkMonitor.isOnline()
+                VbDebugLog.log(
+                    "offline",
+                    "$what failed (${error.message}); attempt=$attempt online=$online wait=${waitMs}ms " +
+                        "queued=${_uiState.value.pendingAudioChunks}",
+                )
+                _uiState.update {
+                    it.copy(
+                        status = if (online) {
+                            "Service slow; retrying $what in ${waitMs / 1_000}s. Evidence is kept on this phone."
+                        } else {
+                            "Offline: ${it.pendingAudioChunks} audio chunk(s) kept on this phone; " +
+                                "notes resume when the network returns."
+                        },
+                    )
+                }
+                delay(waitMs)
+                if (!networkMonitor.awaitOnline(::mayKeepWaiting)) throw error
             }
         }
-        throw lastFailure ?: IllegalStateException("Audio transcription failed without an error.")
+    }
+
+    private fun mayKeepWaiting(): Boolean {
+        if (_uiState.value.stage == LiveCaptureStage.RUNNING) return true
+        val deadline = stopDrainDeadline ?: return false
+        return System.currentTimeMillis() < deadline
     }
 
     private suspend fun retainAudioWithWarning(chunk: QueuedAudioChunk, message: String) {
@@ -1367,7 +1431,84 @@ class CaptureSessionViewModel(
                 },
             )
         }
-        verifyFinishedNote()
+        stopDrainDeadline = null
+        viewModelScope.launch {
+            consolidateFinishedNote()
+            verifyFinishedNote()
+        }
+    }
+
+    /**
+     * Merges topics the lecturer taught more than once into one heading each.
+     *
+     * Live deltas may only append, so a re-explanation for students who missed it arrives as a
+     * second section on the same topic. One pass at Stop fixes that. The pre-merge Markdown is
+     * written to private storage first and the verbatim transcript stays in the database, so a
+     * bad merge is recoverable; a failed one leaves the note exactly as it was.
+     */
+    private suspend fun consolidateFinishedNote() {
+        val state = _uiState.value
+        val session = state.activeSession ?: return
+        val markdown = state.generatedMarkdown
+        if (state.notePolicy == CaptureNotePolicy.VERBATIM || markdown.length < MIN_CONSOLIDATE_CHARS) {
+            VbDebugLog.log("consolidate", "skipped policy=${state.notePolicy} noteChars=${markdown.length}")
+            return
+        }
+        if (markdown.length > MAX_CONSOLIDATE_MARKDOWN_CHARS) {
+            VbDebugLog.log("consolidate", "skipped: note too long (${markdown.length} chars)")
+            return
+        }
+        _uiState.update { it.copy(status = "Merging repeated topics in the note…") }
+        try {
+            withContext(Dispatchers.IO) {
+                File(getApplication<Application>().filesDir, "pre-consolidation").apply { mkdirs() }
+                    .resolve("${safeFileToken(session.id)}.md")
+                    .writeText(markdown)
+            }
+            val result = consolidationClient.consolidate(
+                sessionId = session.id,
+                requestId = "consolidate-${session.id}",
+                noteMarkdown = markdown,
+                subjectHint = state.notes.firstOrNull { it.id == state.activeNoteId }?.title.orEmpty(),
+            )
+            VbDebugLog.log(
+                "consolidate",
+                "chars ${markdown.length}->${result.markdown.length} merged=${result.mergedTopics.joinToString("; ")}",
+            )
+            VbDebugLog.logText("consolidate", "result", result.markdown)
+            noteUpdateMutex.withLock {
+                val latest = _uiState.value
+                if (latest.generatedMarkdown != markdown) return@withLock
+                when (
+                    val update = sessionRepository.applyGeneratedMarkdown(
+                        sessionId = session.id,
+                        patchId = "consolidation-${session.id}",
+                        expectedRevision = latest.revision,
+                        markdown = result.markdown,
+                    )
+                ) {
+                    is GeneratedMarkdownUpdateResult.Apply,
+                    is GeneratedMarkdownUpdateResult.Duplicate,
+                    -> _uiState.update {
+                        it.copy(
+                            revision = update.revision,
+                            generatedMarkdown = result.markdown,
+                            status = if (result.mergedTopics.isEmpty()) {
+                                "Note checked for repeated topics; none needed merging."
+                            } else {
+                                "Merged ${result.mergedTopics.size} repeated topic(s) in the note."
+                            },
+                        )
+                    }
+                    else -> VbDebugLog.log("consolidate", "not saved: revision moved")
+                }
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            VbDebugLog.log("consolidate", "FAILED ${error::class.simpleName}: ${error.message}")
+            recordServiceFailure((error as? NoteConsolidationException)?.failure)
+        }
     }
 
     /**
@@ -1491,6 +1632,15 @@ class CaptureSessionViewModel(
 }
 
 internal val TRANSCRIPTION_RETRY_DELAYS_MS = listOf(750L, 2_000L)
+
+/** Below this much detected speech a chunk is not sent for transcription. */
+internal const val MIN_VOICED_MS_FOR_TRANSCRIPTION = 700L
+
+/** How long Stop keeps waiting for the network before leaving unsent audio as recovery WAVs. */
+internal const val STOP_DRAIN_GRACE_MS = 90_000L
+
+/** Short notes have nothing worth merging. */
+internal const val MIN_CONSOLIDATE_CHARS = 1_200
 
 private const val REVIEW_START_MARKER = "<!-- voxbox-review:start -->"
 private const val REVIEW_END_MARKER = "<!-- voxbox-review:end -->"
