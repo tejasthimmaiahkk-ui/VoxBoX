@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Application
 import android.content.pm.PackageManager
 import android.net.Uri
+import me.thimmaiah.voxbox.board.mergeAdjacentRegions
 import me.thimmaiah.voxbox.network.NetworkMonitor
 import me.thimmaiah.voxbox.network.offlineBackoffMs
 import androidx.core.content.ContextCompat
@@ -180,6 +181,13 @@ class CaptureSessionViewModel(
      * "Finishing…" forever. Anything still unsent then stays as a private recovery WAV.
      */
     @Volatile private var stopDrainDeadline: Long? = null
+
+    /**
+     * Diagram crops are taken only from a frame the student asked for with "Capture now". Timed
+     * frames still feed board text into the note, but a crop the student did not choose was as
+     * likely to be half a figure, or the lecturer's back, as the diagram they wanted.
+     */
+    @Volatile private var diagramCropRequested = false
     private val boardCoordinator = BoardExtractionCoordinator(
         remoteClient = HttpBoardExtractionClient(),
         offlineClient = MlKitBoardExtractionClient(),
@@ -306,6 +314,7 @@ class CaptureSessionViewModel(
      */
     fun captureFrameNow() {
         frameChangeDetector.forceNextCapture()
+        diagramCropRequested = true
         _uiState.update { it.copy(status = "Next frame will be captured.") }
         VbDebugLog.log("frame", "manual capture requested")
     }
@@ -782,6 +791,8 @@ class CaptureSessionViewModel(
         val session = state.activeSession ?: return deleteTrackedFrame(file)
         val bytes = file.readBytes()
         val decision = frameChangeDetector.evaluate(bytes, state.changeThreshold)
+        val cropDiagrams = diagramCropRequested && decision.accepted
+        if (cropDiagrams) diagramCropRequested = false
         VbDebugLog.log(
             "frame",
             "accepted=${decision.accepted} score=${"%.4f".format(decision.score)} " +
@@ -841,7 +852,9 @@ class CaptureSessionViewModel(
         try {
             val extraction = boardCoordinator.extract(bytes)
             val noteId = state.activeNoteId ?: error("The active note is missing.")
-            val assetLinks = extraction.diagramRegions.mapIndexed { index, region ->
+            val regions = if (cropDiagrams) mergeAdjacentRegions(extraction.diagramRegions) else emptyList()
+            VbDebugLog.log("frame", "diagram regions=${extraction.diagramRegions.size} cropped=${regions.size} manual=$cropDiagrams")
+            val assetLinks = regions.mapIndexed { index, region ->
                 val assetToken = "${evidence.id.take(12)}-${index + 1}"
                 val stored = diagramCropper.cropAndStore(bytes, region, noteId, assetToken)
                 try {

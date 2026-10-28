@@ -54,3 +54,24 @@ class DiagramParseTest {
         assertTrue(blocks.single() is MdBlock.Code)
     }
 }
+
+class DiagramRegionMergeTest {
+    @Test
+    fun piecesOfOneDrawingBecomeOneCropButSeparateDrawingsStaySeparate() {
+        val r = { l: Double, t: Double, w: Double, h: Double, c: String ->
+            me.thimmaiah.voxbox.board.DiagramRegion(l, t, w, h, c)
+        }
+        val merged = me.thimmaiah.voxbox.board.mergeAdjacentRegions(
+            listOf(
+                r(0.10, 0.10, 0.15, 0.20, "nucleus"),
+                r(0.27, 0.12, 0.10, 0.10, "arrow"),
+                r(0.39, 0.10, 0.12, 0.15, "alpha particle"),
+                r(0.70, 0.70, 0.20, 0.20, "table"),
+            ),
+        )
+        assertEquals(2, merged.size)
+        assertEquals("nucleus; arrow; alpha particle", merged[0].caption)
+        assertEquals(0.10, merged[0].left, 1e-9)
+        assertEquals(0.51, merged[0].left + merged[0].width, 1e-9)
+    }
+}

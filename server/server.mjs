@@ -1667,6 +1667,9 @@ async function callConsolidateProvider({ apiKey, request, fetchImpl }) {
     "Keep every distinct fact, definition, step, formula, example, exception and number exactly once.",
     "Never add information that is not already in the notes, and never shorten by dropping a distinct point.",
     "Keep the lecture's teaching order for the first appearance of each topic.",
+    // The first device run collapsed a sectioned note into one paragraph while halving it.
+    "Keep the note's structure: a ## heading per topic, with its bullets, numbered steps, tables and equations.",
+    "Remove a sentence only when another sentence in the note already states the same fact.",
     "Copy every Markdown image line (![...](...)), every fenced ``` block and every '> [!' callout block unchanged into the section it belongs to.",
     "Drop text that is plainly not part of the lesson (advertisements, device instructions, side conversations).",
     "Return the whole consolidated note in markdown and list the topics you merged in mergedTopics.",
