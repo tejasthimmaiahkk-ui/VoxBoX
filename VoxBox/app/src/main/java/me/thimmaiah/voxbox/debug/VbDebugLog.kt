@@ -37,6 +37,10 @@ object VbDebugLog {
 
     @Synchronized
     fun log(tag: String, message: String) {
+        // Mirrored to logcat even when the in-app log is off, so a connected test machine can
+        // follow a live session. It carries the same metadata and previews as the in-app log,
+        // never full transcript text, and logcat is readable only over the owner's adb.
+        runCatching { android.util.Log.i("VoxBox", "[$tag] $message") }
         if (!enabled) return
         if (entries.size >= MAX_ENTRIES) entries.removeFirst()
         entries.addLast("${stamp.format(Date())}  [$tag] $message")
@@ -45,7 +49,6 @@ object VbDebugLog {
     /** Records text volume and a short prefix, never the whole utterance. */
     @Synchronized
     fun logText(tag: String, label: String, text: String) {
-        if (!enabled) return
         val preview = text.take(PREVIEW_CHARS).replace('\n', ' ')
         val suffix = if (text.length > PREVIEW_CHARS) "…" else ""
         log(tag, "$label chars=${text.length} preview=\"$preview$suffix\"")

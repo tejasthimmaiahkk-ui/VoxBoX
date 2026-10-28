@@ -15,6 +15,8 @@ sealed interface MdBlock {
     data class Quote(val callout: String?, val spans: List<MdSpan>) : MdBlock
     /** Fenced code, or a `$$…$$` display equation. Rendered monospaced and horizontally scrolled. */
     data class Code(val text: String, val isMath: Boolean) : MdBlock
+    /** A ```mermaid block the app can draw itself; see [parseDiagram]. */
+    data class Diagram(val spec: DiagramSpec, val source: String) : MdBlock
     /** Header row plus body rows. Tables are how a comparison should read, not as bullets. */
     data class Table(val header: List<List<MdSpan>>, val rows: List<List<List<MdSpan>>>) : MdBlock
     data object Divider : MdBlock
@@ -74,6 +76,7 @@ fun parseMarkdownBlocks(markdown: String): List<MdBlock> {
         if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
             flushParagraph()
             val fence = trimmed.take(3)
+            val language = trimmed.drop(3).trim().lowercase()
             val body = StringBuilder()
             index += 1
             while (index < lines.size && !lines[index].trim().startsWith(fence)) {
@@ -81,7 +84,9 @@ fun parseMarkdownBlocks(markdown: String): List<MdBlock> {
                 index += 1
             }
             index += 1
-            blocks += MdBlock.Code(body.toString().trimEnd(), isMath = false)
+            val source = body.toString().trimEnd()
+            val diagram = if (language == "mermaid") parseDiagram(source) else null
+            blocks += if (diagram != null) MdBlock.Diagram(diagram, source) else MdBlock.Code(source, isMath = false)
             continue
         }
 

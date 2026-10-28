@@ -121,7 +121,7 @@ fun CaptureSetupScreen(
         Row(horizontalArrangement = Arrangement.spacedBy(VbSpace.gap)) {
             VbChoiceTile(
                 title = "Voice",
-                body = "Audio only, in 20-second chunks.",
+                body = "Audio only, cut at natural pauses.",
                 icon = VbIcons.Mic,
                 selected = state.mode == CaptureMode.VOICE,
                 onClick = { viewModel.setMode(CaptureMode.VOICE) },

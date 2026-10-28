@@ -28,6 +28,9 @@ data class RecordedAudioChunk(
      * lecturer writing on the board, a pause) are not worth a transcription call.
      */
     val voicedMs: Long = durationMs,
+    /** Loudest 20 ms frame and the noise floor at the cut, logged so the gate can be calibrated. */
+    val peakRms: Int = 0,
+    val floorRms: Int = 0,
 )
 
 class PcmAudioChunkRecorder(
@@ -216,6 +219,7 @@ internal class PcmChunkAccumulator(
     private var noiseFloor = -1.0
     private var voicedBytes = 0
     private var quietRunBytes = 0
+    private var peakRms = 0.0
 
     init {
         require(targetBytes > 0 && targetBytes % 2 == 0)
@@ -267,8 +271,11 @@ internal class PcmChunkAccumulator(
         noiseFloor = when {
             noiseFloor < 0 -> rms
             rms < noiseFloor -> noiseFloor * 0.7 + rms * 0.3
-            else -> noiseFloor * 0.995 + rms * 0.005
+            // Rises slowly (about 20 s to track a new steady hum) so a lecturer talking over a
+            // music bed or a reverberant room does not drag the floor up to their own level.
+            else -> noiseFloor * 0.999 + rms * 0.001
         }
+        peakRms = maxOf(peakRms, rms)
         if (rms > maxOf(noiseFloor * SPEECH_OVER_FLOOR, MIN_SPEECH_RMS)) {
             voicedBytes += frameBytes
             quietRunBytes = 0
@@ -294,19 +301,27 @@ internal class PcmChunkAccumulator(
             durationMs = duration,
             wavBytes = encodePcm16MonoWav(pcm, sampleRate),
             voicedMs = pcmDurationMs(minOf(voicedBytes, pcm.size), sampleRate),
+            peakRms = peakRms.toInt(),
+            floorRms = noiseFloor.coerceAtLeast(0.0).toInt(),
         )
         emittedDurationMs += duration - overlapMs
         carriedBytes = if (overlapBytes > 0) carried else 0
         voicedBytes = 0
         quietRunBytes = 0
+        peakRms = 0.0
         return chunk
     }
 
     private companion object {
-        /** About +8 dB over the floor: a voice carries over a fan, steady hum does not. */
-        const val SPEECH_OVER_FLOOR = 2.5
-        /** Below this a frame is silence on any phone microphone, whatever the floor says. */
-        const val MIN_SPEECH_RMS = 120.0
+        /** +6 dB over the floor: a voice carries over a fan, steady hum does not. */
+        const val SPEECH_OVER_FLOOR = 2.0
+
+        /**
+         * Only digital silence is ruled out absolutely. A phone at the back of a hall, or
+         * listening to laptop speakers, records speech far below any "normal" level (a first
+         * device run measured whole lectures under 120 RMS), so loudness must be relative.
+         */
+        const val MIN_SPEECH_RMS = 12.0
     }
 }
 

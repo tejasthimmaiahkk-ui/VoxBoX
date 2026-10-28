@@ -892,7 +892,7 @@ test("note detail and a custom instruction reach the model and are bounded", asy
     }) } }] }), { status: 200 });
   };
 
-  for (const [detail, phrase] of [["concise", "Be brief"], ["detailed", "You may expand"]]) {
+  for (const [detail, phrase] of [["concise", "Write tersely"], ["detailed", "You may expand"]]) {
     const base = await start({
       env: { OPENROUTER_API_KEY: "test", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
       fetchImpl: capture,
@@ -1225,4 +1225,21 @@ test("consolidation that drops a diagram or collapses the note is rejected", asy
   });
   const second = await post(collapsed, "/v1/notes/consolidate", { sessionId: "s", requestId: "c-3", noteMarkdown: REPEATED_NOTE });
   assert.equal(second.status, 502);
+});
+
+test("every note request asks for completeness and allows built-in diagrams", async () => {
+  let sent;
+  const base = await start({
+    env: { OPENROUTER_API_KEY: "test", VOXBOX_CLIENT_TOKEN: CLIENT_TOKEN },
+    fetchImpl: async (_url, options) => {
+      sent = JSON.parse(options.body);
+      return new Response("{}", { status: 500 });
+    },
+  });
+  await post(base, "/v1/notes/refine", noteRequest({ noteDetail: "concise" }));
+  const system = sent.messages[0].content;
+  assert.ok(system.includes("never drop a distinct point"));
+  assert.ok(system.includes("```mermaid flowchart TD"));
+  assert.ok(system.includes("xychart-beta"));
+  assert.ok(!system.includes("prefer adding nothing"));
 });

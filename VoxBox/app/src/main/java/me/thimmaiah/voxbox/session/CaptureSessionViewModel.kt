@@ -102,7 +102,7 @@ data class CaptureSessionUiState(
     val selectedSyllabusId: String? = null,
     val mode: CaptureMode = CaptureMode.VOICE,
     val notePolicy: CaptureNotePolicy = CaptureNotePolicy.RUNNABLE,
-    val noteDetail: NoteDetail = NoteDetail.CONCISE,
+    val noteDetail: NoteDetail = NoteDetail.STANDARD,
     val customInstruction: String = "",
     val frameIntervalMs: Long = CaptureSessionSettings.DEFAULT_FRAME_INTERVAL_MS,
     val changeThreshold: Double = CaptureSessionSettings.DEFAULT_CHANGE_THRESHOLD,
@@ -587,13 +587,15 @@ class CaptureSessionViewModel(
         if (chunk.voicedMs < MIN_VOICED_MS_FOR_TRANSCRIPTION) {
             VbDebugLog.log(
                 "transcribe",
-                "skipped quiet chunk offset=${chunk.offsetMs} durationMs=${chunk.durationMs} voicedMs=${chunk.voicedMs}",
+                "skipped quiet chunk offset=${chunk.offsetMs} durationMs=${chunk.durationMs} voicedMs=${chunk.voicedMs} " +
+                    "peak=${chunk.peakRms} floor=${chunk.floorRms}",
             )
             return
         }
         VbDebugLog.log(
             "audio",
-            "chunk offset=${chunk.offsetMs} durationMs=${chunk.durationMs} voicedMs=${chunk.voicedMs}",
+            "chunk offset=${chunk.offsetMs} durationMs=${chunk.durationMs} voicedMs=${chunk.voicedMs} " +
+                "peak=${chunk.peakRms} floor=${chunk.floorRms}",
         )
         val queued = storeRecoverableAudio(chunk)
         _uiState.update {
@@ -1634,7 +1636,7 @@ class CaptureSessionViewModel(
 internal val TRANSCRIPTION_RETRY_DELAYS_MS = listOf(750L, 2_000L)
 
 /** Below this much detected speech a chunk is not sent for transcription. */
-internal const val MIN_VOICED_MS_FOR_TRANSCRIPTION = 700L
+internal const val MIN_VOICED_MS_FOR_TRANSCRIPTION = 400L
 
 /** How long Stop keeps waiting for the network before leaving unsent audio as recovery WAVs. */
 internal const val STOP_DRAIN_GRACE_MS = 90_000L

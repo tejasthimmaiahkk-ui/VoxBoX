@@ -28,7 +28,11 @@
             android:name=".MainActivity"
             android:exported="true"
             android:theme="@style/Theme.VoxBox"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density"
             android:windowSoftInputMode="adjustResize">
+            <!-- Compose relays out on rotation by itself. Letting Android recreate the activity
+                 instead tore down the camera and recorder mid-lecture, which ended the session
+                 whenever a student tilted the phone toward the board. -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 

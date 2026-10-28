@@ -203,12 +203,12 @@ private fun StartCard(
         )
         Spacer(Modifier.height(24.dp))
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            RecordButton(onStart)
+            RecordButton(mode, onStart)
         }
         Spacer(Modifier.height(20.dp))
         Text(
             text = if (mode == CaptureMode.VOICE) {
-                "Continuous audio in 20-second chunks, transcribed with per-chunk speaker labels."
+                "Continuous audio, cut at the speaker's natural pauses and transcribed with speaker labels."
             } else {
                 "Audio, plus the board through the camera. Frames that have not changed never leave the phone."
             },
@@ -230,7 +230,7 @@ private fun StartCard(
 
 /** 92.dp circle with two rings breathing out behind it. */
 @Composable
-private fun RecordButton(onClick: () -> Unit) {
+private fun RecordButton(mode: CaptureMode, onClick: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val press by animateFloatAsState(
@@ -256,7 +256,9 @@ private fun RecordButton(onClick: () -> Unit) {
                 ),
         ) {
             Icon(
-                painter = painterResource(VbIcons.Mic),
+                // The button shows what will be captured: Board also records audio, but the
+                // camera is what makes it different, so a microphone here read as Voice.
+                painter = painterResource(if (mode == CaptureMode.VOICE) VbIcons.Mic else VbIcons.Camera),
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onPrimary,
                 modifier = Modifier.size(34.dp),

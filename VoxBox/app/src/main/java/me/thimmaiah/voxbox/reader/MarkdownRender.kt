@@ -170,6 +170,8 @@ private fun MarkdownBlock(
             }
         }
 
+        is MdBlock.Diagram -> DiagramView(block.spec, bodyStyle, tapToEdit)
+
         // Never wrapped: a wrapped equation is a wrong equation.
         is MdBlock.Code -> Box(
             Modifier
