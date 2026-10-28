@@ -223,13 +223,15 @@ class NoteLibraryViewModel(application: Application) : AndroidViewModel(applicat
         _uiState.value = _uiState.value.copy(exportZipPath = null)
     }
 
-    fun startEditing(block: NoteBlockEntity) {
+    /** Returns false when the block has no editable form, so the caller does not open an empty editor. */
+    fun startEditing(block: NoteBlockEntity): Boolean {
         val draft = block.toEditDraftOrNull()
         _uiState.value = if (draft == null) {
             _uiState.value.copy(status = "This saved block cannot be edited yet.")
         } else {
             _uiState.value.copy(editDraft = draft, status = "Editing saved ${block.type.lowercase().replace('_', ' ')}.")
         }
+        return draft != null
     }
 
     fun updateEditDraft(transform: (NoteBlockEditDraft) -> NoteBlockEditDraft) {

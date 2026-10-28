@@ -211,8 +211,9 @@ fun NoteReaderScreen(
                     bodyStyle = bodyStyle,
                     query = query,
                     onEdit = {
-                        viewModel.startEditing(block)
-                        sheet = Sheet.EDIT
+                        // A live-generated block has no editable form; opening the sheet anyway
+                        // showed an empty field that ignored typing and a Save that did nothing.
+                        if (viewModel.startEditing(block)) sheet = Sheet.EDIT
                     },
                 )
                 diagrams.forEach { link -> DiagramBlock(link) }
